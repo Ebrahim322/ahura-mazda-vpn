@@ -1,0 +1,183 @@
+name: CI
+
+# Continuous integration for Ahura Mazda.
+#
+# Runs on every push / pull request and verifies that the tunnel-core AAR and
+# the Android APK build. It does NOT need any repository secrets: when the
+# Psiphon network values or the signing key are missing, placeholder values
+# and a throwaway signing key are used. The resulting APK is therefore only
+# useful for UI testing — it cannot connect to the network. Use the
+# "Build & Release" workflow (build.yml) to produce real, signed releases.
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TUNNEL_CORE_REPO: shirokhorshid/psiphon-tunnel-core
+  TUNNEL_CORE_REF: shirokhorshid
+
+jobs:
+  build-aar:
+    name: Build tunnel-core AAR
+    runs-on: ubuntu-latest
+    outputs:
+      core_sha: ${{ steps.core.outputs.sha }}
+    steps:
+      - name: Checkout tunnel-core
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TUNNEL_CORE_REPO }}
+          ref: ${{ env.TUNNEL_CORE_REF }}
+          path: psiphon-tunnel-core
+
+      - name: Resolve tunnel-core revision
+        id: core
+        run: echo "sha=$(git -C psiphon-tunnel-core rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached AAR
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ca.psiphon.aar
+          key: ca-psiphon-aar-${{ steps.core.outputs.sha }}-v1
+
+      - name: Set up Go
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.3'
+          cache: false
+
+      - name: Install Android NDK 23 and platform 30
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;23.1.7779620" "platforms;android-30" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/23.1.7779620" >> $GITHUB_ENV
+
+      - name: Set up JDK 8
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Build AAR with gomobile
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          export GOPATH="$RUNNER_TEMP/gopath"
+          export GO111MODULE=off
+          export PATH="$GOPATH/bin:$PATH"
+          mkdir -p "$GOPATH/src/github.com/Psiphon-Labs" "$GOPATH/src/golang.org/x"
+          ln -s "$GITHUB_WORKSPACE/psiphon-tunnel-core" \
+            "$GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core"
+
+          # Vendored gomobile (patched to not fetch gobind from the network)
+          cp -r psiphon-tunnel-core/MobileLibrary/go-mobile "$GOPATH/src/golang.org/x/mobile"
+          sed -i 's/golang.org\/x\/mobile\/cmd\/gobind@latest/golang.org\/x\/mobile\/cmd\/gobind/' \
+            "$GOPATH/src/golang.org/x/mobile/cmd/gomobile/init.go"
+          go install golang.org/x/mobile/cmd/gomobile
+          go install golang.org/x/mobile/cmd/gobind
+          gomobile init
+
+          WORKDIR="$GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/Android"
+          cd "$WORKDIR"
+          PKG=github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo
+          LDFLAGS="-checklinkname=0 -s -w"
+          LDFLAGS="$LDFLAGS -X $PKG.buildDate=$(date --iso-8601=seconds)"
+          LDFLAGS="$LDFLAGS -X $PKG.buildRepo=https://github.com/${TUNNEL_CORE_REPO}"
+          LDFLAGS="$LDFLAGS -X $PKG.buildRev=$(git -C "$GITHUB_WORKSPACE/psiphon-tunnel-core" rev-parse --short HEAD)"
+          LDFLAGS="$LDFLAGS -X $PKG.goVersion=$(go version | perl -ne '/go(.*?)\s/ && print $1')"
+          LDFLAGS="$LDFLAGS -X $PKG.gomobileVersion=vendored"
+          LDFLAGS="$LDFLAGS -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+          export CGO_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+          export GOCACHE=/tmp/go-cache
+
+          gomobile bind \
+            -target=android/arm,android/arm64 \
+            -tags="PSIPHON_ENABLE_INPROXY" \
+            -ldflags="$LDFLAGS" \
+            -o psi.aar \
+            github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+
+          # Post-process into ca.psiphon.aar (adds PsiphonTunnel.java wrapper)
+          mkdir -p aar_tmp && cd aar_tmp
+          unzip -q -o ../psi.aar
+          cp ../PsiphonTunnel/AndroidManifest.xml .
+          mkdir -p res/xml
+          cp ../PsiphonTunnel/ca_psiphon_psiphontunnel_backup_rules.xml res/xml/
+          mkdir -p compiled_classes
+          javac -source 1.8 -target 1.8 \
+            -bootclasspath "$ANDROID_HOME/platforms/android-30/android.jar" \
+            -classpath classes.jar -d compiled_classes \
+            ../PsiphonTunnel/PsiphonTunnel.java
+          (cd compiled_classes && jar uf ../classes.jar .)
+          rm -rf compiled_classes
+          echo "-keep class ca.psiphon.** { *; }" >> proguard.txt
+          echo "-keep class psi.** { *; }" >> proguard.txt
+          zip -q -r "$GITHUB_WORKSPACE/ca.psiphon.aar" . -x '*.DS_Store'
+
+      - name: Upload AAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ca-psiphon-aar
+          path: ca.psiphon.aar
+          retention-days: 3
+
+  build-apk:
+    name: Build APK
+    needs: build-aar
+    runs-on: ubuntu-latest
+    container:
+      image: cimg/android:2024.01.1-ndk
+      options: --user root
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download AAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ca-psiphon-aar
+          path: app/libs/
+
+      - name: Install system dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq libtinfo5 > /dev/null
+
+      - name: Throwaway signing key
+        run: |
+          keytool -genkeypair -v -keystore ci.keystore -storepass cipassword \
+            -keypass cipassword -alias ci -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname "CN=Ahura Mazda CI" > /dev/null 2>&1
+          printf 'STORE_FILE=../ci.keystore\nSTORE_PASSWORD=cipassword\nKEY_ALIAS=ci\nKEY_PASSWORD=cipassword\n' > signing.properties
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon testReleaseUnitTest
+        env:
+          PSIPHON_PROPAGATION_CHANNEL_ID: CI_PLACEHOLDER
+          PSIPHON_SPONSOR_ID: CI_PLACEHOLDER
+
+      - name: Build APK
+        run: ./gradlew --no-daemon assembleRelease
+        env:
+          PSIPHON_PROPAGATION_CHANNEL_ID: CI_PLACEHOLDER
+          PSIPHON_SPONSOR_ID: CI_PLACEHOLDER
+
+      - name: Upload APK (UI testing only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ahuramazda-ci-apk
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 7
