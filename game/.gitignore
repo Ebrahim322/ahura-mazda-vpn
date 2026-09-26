@@ -1,0 +1,4 @@
+.build/
+.preview/
+qr.png
+*.idsig

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>نبرد اهورا — دانلود بازی اندروید</title>
+<style>
+  :root {
+    --bg: #14100b;
+    --panel: #1e1811;
+    --gold: #e0a63c;
+    --text: #f0e2c0;
+    --dim: #b09b74;
+    --line: #3a2f1f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 50% -10%, #2c2317 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: "Segoe UI", Tahoma, "Noto Nastaliq Urdu", "Noto Sans Arabic", sans-serif;
+    line-height: 1.9;
+    padding: 0 16px 64px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  header { text-align: center; padding: 44px 0 18px; }
+  h1 {
+    margin: 0;
+    font-size: clamp(34px, 8vw, 64px);
+    color: var(--gold);
+    letter-spacing: 1px;
+    text-shadow: 0 4px 18px rgba(224,166,60,.25);
+  }
+  .sub { color: var(--dim); font-size: 15px; letter-spacing: 4px; margin-top: 6px; }
+  .tagline { margin-top: 16px; color: var(--text); font-size: 17px; opacity: .9; }
+  .card {
+    background: linear-gradient(180deg, #221b13, #191309);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 24px;
+    margin: 22px 0;
+    box-shadow: 0 18px 40px rgba(0,0,0,.45);
+  }
+  .dl {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    text-align: center;
+  }
+  .btn {
+    display: inline-block;
+    background: linear-gradient(180deg, #f0bd57, #c8871f);
+    color: #211704;
+    font-weight: 800;
+    font-size: 22px;
+    text-decoration: none;
+    padding: 18px 42px;
+    border-radius: 14px;
+    box-shadow: 0 10px 26px rgba(224,166,60,.28);
+    transition: transform .12s ease, filter .12s ease;
+  }
+  .btn:hover { transform: translateY(-2px); filter: brightness(1.06); }
+  .meta { color: var(--dim); font-size: 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 22px; align-items: center; justify-content: center; }
+  .qr { background: #fff; padding: 10px; border-radius: 14px; }
+  .qr img { display: block; width: 150px; height: 150px; }
+  code {
+    background: #0f0c08; border: 1px solid var(--line); border-radius: 8px;
+    padding: 3px 8px; font-size: 13px; direction: ltr; display: inline-block; word-break: break-all;
+  }
+  a { color: var(--gold); }
+  h2 { color: var(--gold); font-size: 21px; margin: 0 0 12px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+  ul { margin: 0; padding-inline-start: 20px; }
+  li { margin: 6px 0; }
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .shots figure { margin: 0; }
+  .shots img { width: 100%; border-radius: 12px; border: 1px solid var(--line); display: block; }
+  .shots figcaption { color: var(--dim); font-size: 13px; text-align: center; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  td { padding: 7px 4px; border-bottom: 1px dashed var(--line); }
+  td:first-child { color: var(--dim); width: 45%; }
+  footer { text-align: center; color: var(--dim); font-size: 13px; margin-top: 30px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>نبرد اهورا</h1>
+    <div class="sub">AHURA&nbsp;WAR</div>
+    <div class="tagline">یک بازی جنگی اکشنِ تانک برای اندروید — آفلاین، بدون تبلیغ، ۱۲۰ کیلوبایت</div>
+  </header>
+
+  <div class="card dl">
+    <a class="btn" href="ahura-war.apk" download>⬇ دانلود مستقیم APK</a>
+    <div class="meta">نسخه ۱.۰ · اندروید ۶ به بالا · حجم ۱۲۱ کیلوبایت · بدون نیاز به اینترنت</div>
+    <div class="row">
+      <div class="qr"><img src="qr.png" alt="QR code"></div>
+      <div style="max-width: 380px; text-align: right; font-size: 14px; color: var(--dim)">
+        با دوربین گوشی این کد را اسکن کن تا فایل مستقیماً روی موبایل دانلود شود
+        (لینکِ دائمیِ گیت‌هاب):
+        <br>
+        <code id="ghlink">https://github.com/Ebrahim322/ahura-mazda-vpn/raw/arena/01a0de6a-ahura-mazda-vpn/game/ahura-war.apk</code>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>روش نصب</h2>
+    <ul>
+      <li>دکمهٔ «دانلود مستقیم APK» را بزن (یا کد QR را اسکن کن).</li>
+      <li>اگر پیام «نصب از منابع ناشناس» آمد، اجازه بده:
+        <b>Settings → Apps → Special access → Install unknown apps → مرورگرت → Allow</b></li>
+      <li>فایل را باز کن و Install را بزن. تمام!</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>تصاویر بازی</h2>
+    <div class="shots">
+      <figure><img src="preview/gameplay.jpg" alt="نمایش gameplay"><figcaption>نبرد با سربازها و تانک‌های دشمن</figcaption></figure>
+      <figure><img src="preview/boss.jpg" alt="نبرد با فرمانده"><figcaption>فرمانده دشمن (هر ۵ موج)</figcaption></figure>
+      <figure><img src="preview/menu.jpg" alt="منوی اصلی"><figcaption>منوی اصلی</figcaption></figure>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>امکانات</h2>
+    <ul>
+      <li>کنترل با جوی‌استیک لمسی در سمت چپ و شلیک با سمت راست صفحه</li>
+      <li>۶ نوع دشمن: سرباز، خودروی شناسایی، تانک، تیربار، بالگرد و فرمانده (باس)</li>
+      <li>سلاح‌ها و قدرت‌ها: تیر زیاد، سه‌تیر، سپر، درمان، بمب اتمی و پشتیبانی هوایی</li>
+      <li>موانع مخفی‌گاه، بشکه‌های انفجاری و محیط قابل تخریب</li>
+      <li>امواج بی‌پایان با افزایش تدریجی سختی، ضریب امتیاز پشت‌هم (Combo) و رکوردِ بهترین امتیاز</li>
+      <li>موسیقی و افکت‌های صوتی تولیدشده در لحظه (بدون فایل صوتی)</li>
+      <li>لرزش گوشی هنگام آسیب، ذخیرهٔ تنظیمات و رکورد، پشتیبانی از کیبورد/دسته</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>مشخصات فنی</h2>
+    <table>
+      <tr><td>بسته (Package)</td><td>com.ahuramazda.war</td></tr>
+      <tr><td>حداقل اندروید</td><td>۶٫۰ (API 23) — تا اندروید ۱۴</td></tr>
+      <tr><td>معماری</td><td>Java/Kotlin-free، فقط DEX استاندارد (همهٔ پردازنده‌ها)</td></tr>
+      <tr><td>دسترسی‌ها</td><td>فقط لرزش (VIBRATE) — بدون اینترنت و بدون تبلیغ</td></tr>
+      <tr><td>حجم</td><td>حدود ۱۲۱ کیلوبایت</td></tr>
+      <tr><td>ساخت</td><td>کاملاً از سورس، با ابزار خط‌فرمان (بدون اندروید استودیو)</td></tr>
+    </table>
+  </div>
+
+  <footer>
+    <a href="https://github.com/Ebrahim322/ahura-mazda-vpn/tree/arena/01a0de6a-ahura-mazda-vpn/game">سورس کامل و دستور ساخت در گیت‌هاب</a>
+  </footer>
+
+</div>
+</body>
+</html>
