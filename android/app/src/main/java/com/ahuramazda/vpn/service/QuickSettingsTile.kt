@@ -20,17 +20,17 @@ class QuickSettingsTile : TileService() {
         } else {
             AhuraVpnService.start(this)
         }
-        tile?.let {
-            it.state = if (AhuraVpnService.connected) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-            it.updateTile()
+        getTile()?.let { current ->
+            current.state = if (AhuraVpnService.connected) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+            current.updateTile()
         }
     }
 
     private fun refresh() {
-        val tile = tile ?: return
-        tile.state = if (AhuraVpnService.connected) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        tile.icon = Icon.createWithResource(this, R.drawable.ic_notification)
-        tile.label = getString(R.string.app_name)
-        tile.updateTile()
+        val current = getTile() ?: return
+        current.state = if (AhuraVpnService.connected) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        current.icon = Icon.createWithResource(this, R.drawable.ic_notification)
+        current.label = getString(R.string.app_name)
+        current.updateTile()
     }
 }

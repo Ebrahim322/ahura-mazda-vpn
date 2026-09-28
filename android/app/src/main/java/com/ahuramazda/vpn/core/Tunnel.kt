@@ -19,6 +19,7 @@ class TunnelConfig(
     val username: String,
     val password: String,
     val rules: RuleSet,
+    val enableV6: Boolean,
     val udpEnabled: Boolean,
     val dnsPrimary: String,
     val dnsSecondary: String,

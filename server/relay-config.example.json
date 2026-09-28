@@ -4,7 +4,8 @@
   "dashboard_host": "0.0.0.0",
   "dashboard_port": 8080,
 
-  "obfs": "ahura/1",
+  "obfs": "any",
+  "public_host": "",
   "stealth_key": "put-a-32-hex-character-key-here",
 
   "tokens": ["phone-1", "laptop:laptop-token", "friend:friend-token"],

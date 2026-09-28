@@ -285,15 +285,17 @@ internal class TcpFlow(
                 }
             }
 
-            if (writeChunk != null) {
+            val chunk = writeChunk
+            writeChunk = null
+            if (chunk != null) {
                 val conn = stream
                 if (conn != null) {
                     try {
-                        conn.write(writeChunk, 0, writeChunk.size)
+                        conn.write(chunk, 0, chunk.size)
                         conn.flush()
                         synchronized(lock) {
-                            toUpstreamBytes -= writeChunk.size
-                            stats.uploaded(writeChunk.size.toLong())
+                            toUpstreamBytes -= chunk.size
+                            stats.uploaded(chunk.size.toLong())
                             lastActivityAt = System.currentTimeMillis()
                         }
                     } catch (e: IOException) {
@@ -302,7 +304,7 @@ internal class TcpFlow(
                         return
                     }
                 } else {
-                    synchronized(lock) { toUpstream.addFirst(writeChunk) }
+                    synchronized(lock) { toUpstream.addFirst(chunk) }
                     idle = true
                 }
             }

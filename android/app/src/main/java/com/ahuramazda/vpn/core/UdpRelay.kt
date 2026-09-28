@@ -161,13 +161,15 @@ internal class UdpFlow(
     }
 
     fun close() {
-        var assoc: UdpAssociation?
+        var assoc: UdpAssociation? = null
         synchronized(lock) {
             if (dead) return
             dead = true
             assoc = association
+            association = null
         }
-        if (assoc != null) closeAssociation(assoc)
+        val closed = assoc
+        if (closed != null) closeAssociation(closed)
         onClosed(key)
     }
 

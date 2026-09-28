@@ -86,7 +86,7 @@ class Socks5Client(private val stream: ObfsStream) {
         // A relay behind NAT answers with an unspecified address; in that case
         // the datagrams go to the relay's host, only the port matters.
         val address = bound.address
-        val usable = address != null && !address.isAnyLocalAddress && !address.isUnspecified()
+        val usable = address != null && !address.isAnyLocalAddress && !address.isLoopbackAddress
         val host = if (usable) address.hostAddress else relayHost
         return InetSocketAddress(host, bound.port)
     }

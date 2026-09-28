@@ -4,6 +4,19 @@ A dependency-free (stdlib only) SOCKS5 relay with the `AHURA/1` stealth layer,
 target policy and a live web dashboard.  It is the server half of Ahura Mazda
 VPN; see `../docs/PROTOCOL.md` for the wire format.
 
+## Install with one line (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ebrahim322/ahura-mazda-vpn/main/server/install.sh | sudo bash
+```
+
+Creates the `ahura` system user, downloads this relay, generates the stealth
+key and a token, writes `/etc/ahura-relay/config.json`, installs
+`ahura-relay.service`, opens the port in ufw/firewalld/nftables and prints an
+`ahura://…` link for the Android app.  Flags: `--port`, `--token`,
+`--stealth-key`, `--obfs any|tls|ahura/1|none`, `--public-host`,
+`--dashboard-port`, `--no-firewall`, `--uninstall`, `--branch`.
+
 ## Run
 
 ```bash
@@ -34,7 +47,12 @@ Endpoints:
 ## Options
 
 ```
---obfs {ahura/1,none}      stealth layer, or plain SOCKS5 for other clients
+--obfs {any,ahura/1,tls,none}
+                           framing accepted on the port (default any):
+                           ahura/1 = compact encrypted records,
+                           tls     = records inside TLS-lookalike frames,
+                           none    = bare SOCKS5 for other clients
+--public-host 203.0.113.9  host used in the printed ahura:// import link
 --socks-user/--socks-pass  require RFC 1929 username/password too
 --allow-private            allow private/loopback/reserved targets (default: refused)
 --allow-cidr 1.1.1.0/24    restrict relayable destinations (repeatable)
@@ -46,6 +64,19 @@ Endpoints:
 --config relay.json        JSON file for any of the above
 --log-level debug          also logs every pump wake-up state (troubleshooting)
 ```
+
+## The import link
+
+On startup, and on the dashboard, the relay prints/shows a link the Android app
+can import in one tap:
+
+```
+ahura://relay@203.0.113.9:1080?key=<stealth_key>&token=<token>&obfs=any&name=vps
+```
+
+The host is `--public-host` when you set it, otherwise the machine's own
+outgoing address (private/loopback addresses are reported as unknown instead of
+being baked into a link that could never work).
 
 ## Production
 

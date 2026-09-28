@@ -254,6 +254,7 @@ class Prefs(context: Context) {
             username = profile.username,
             password = profile.password,
             rules = ruleSet(),
+            enableV6 = enableV6,
             udpEnabled = udpEnabled,
             dnsPrimary = dnsPrimary,
             dnsSecondary = dnsSecondary,

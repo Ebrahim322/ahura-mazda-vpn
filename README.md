@@ -23,6 +23,18 @@ never asks a local resolver which IP belongs to which name.
 
 ---
 
+## What is in it
+
+| Feature | Where |
+|---|---|
+| **TLS-lookalike obfuscation** — every record is wrapped in a `17 03 03 …` TLS frame with random padding, and the first bytes of a session are a textbook `16 03 01 …` ClientHello. The compact `ahura/1` framing and raw SOCKS5 are still there for interop. | `core/Obfs.kt`, `server/ahura_relay.py` (`--obfs any\|tls\|ahura/1\|none`) |
+| **Multiple relays + auto-select + failover** — every relay in the list is probed for real (handshake + SOCKS5 greeting); the app connects to the fastest one, re-tests every two minutes and moves to the next relay if the active one dies. | `core/Probe.kt`, `service/AhuraVpnService.kt`, the *سرورها* tab |
+| **One-line server install** — `curl … \| sudo bash` sets up the user, key, token, systemd unit and firewall, then prints a ready-to-tap `ahura://` link. | `server/install.sh` |
+| **Installable APK** — GitHub Actions builds it on every push; tagged releases attach the APK. | `.github/workflows/build-apk.yml` |
+| Everything else that was already here: IP/CIDR routing rules, per-app rules, UDP, IPv4+IPv6, Persian UI, live dashboard. | — |
+
+---
+
 ## Why it is built this way (the short version)
 
 | Problem on filtered networks | What Ahura does about it |
@@ -46,20 +58,43 @@ android/                 Android app (Kotlin, framework-only, one dependency)
     service/             AhuraVpnService (VpnService), quick-settings tile, boot receiver
     MainActivity.kt      the whole UI (framework widgets, Persian by default, English included)
 server/
-  ahura_relay.py         the relay: SOCKS5 + AHURA/1 + policy + web dashboard (stdlib only)
+  ahura_relay.py         the relay: SOCKS5 + AHURA/1 (compact + TLS-lookalike) + policy + dashboard
+  install.sh             one-line installer: user, key, token, systemd unit, firewall, import link
+  ahura-relay.service    the unit the installer writes (kept here for reference)
   tools/ahura_client.py  reference client (the protocol's second implementation)
-  tools/self_test.py     17 end-to-end protocol/relay tests
+  tools/self_test.py     24 end-to-end protocol/relay tests
   tools/live_probe.py    drives the relay against the real internet
 docs/PROTOCOL.md         the wire format, byte for byte
 docs/ARCHITECTURE.md     how the client is put together and why
+.github/workflows/       builds the APK in the cloud (artifact + release attachment)
 ```
 
 ---
 
 ## 1. Server: put the relay on a VPS
 
-Requirements: `python3` (3.8+) and nothing else.  Open the relay port (default
-`1080`) in the firewall; the dashboard port (`8080`) is optional.
+**The one-liner** (Debian/Ubuntu/Fedora/Alpine with systemd; root required):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ebrahim322/ahura-mazda-vpn/main/server/install.sh | sudo bash
+```
+
+It creates an unprivileged `ahura` user, downloads the relay, generates the
+stealth key and a token, writes `/etc/ahura-relay/config.json`, installs and
+starts `ahura-relay.service`, opens the relay port in ufw/firewalld/nftables,
+and prints:
+
+```
+    ahura://relay@203.0.113.9:1080?key=<hex>&token=phone-ab12&obfs=any&name=vps
+```
+
+Send that link to yourself in any messenger, tap it on the phone (or paste it
+with *درون‌ریزی* in the Servers tab) — the app has everything it needs.
+Handy flags: `--port`, `--token`, `--stealth-key`, `--obfs any|tls|ahura/1|none`,
+`--public-host`, `--dashboard-port`, `--no-firewall`, `--uninstall`, `--branch`.
+
+**Manually**, if you prefer to see every step — requirements are `python3` (3.8+)
+and nothing else:
 
 ```bash
 # on the VPS
@@ -84,7 +119,9 @@ Handy options:
 
 ```bash
 python3 server/ahura_relay.py --help
---obfs none|ahura/1        # "none" = bare SOCKS5 (for other clients)
+--obfs any|tls|ahura/1|none  # "any" (default) accepts both encrypted framings,
+                             # "tls" = TLS-lookalike only, "none" = bare SOCKS5
+--public-host 203.0.113.9    # host used in the printed ahura:// import link
 --allow-cidr 1.1.1.0/24    # only relay to these networks
 --deny-cidr 10.0.0.0/8
 --allow-port 443 --allow-port 80
@@ -98,7 +135,7 @@ A systemd unit and an example config are in `server/`.
 ### Verify the relay (no phone needed)
 
 ```bash
-python3 server/tools/self_test.py      # 17 checks: handshake, auth, TCP, UDP, policy, dashboard
+python3 server/tools/self_test.py      # 24 checks: handshake, TLS framing, auth, TCP, UDP, policy, dashboard
 python3 server/tools/live_probe.py     # real HTTP through the tunnel (needs internet)
 python3 server/tools/ahura_client.py --host 127.0.0.1 --port 1080 \
     --key "$KEY" --token phone-1 --target 1.1.1.1:443 --probe
@@ -106,7 +143,19 @@ python3 server/tools/ahura_client.py --host 127.0.0.1 --port 1080 \
 
 ---
 
-## 2. Android app: build and connect
+## 2. Android app: install or build
+
+**Easiest path — grab the APK that CI built:**
+
+```
+https://github.com/Ebrahim322/ahura-mazda-vpn/releases/latest
+```
+
+(or *Actions → Build APK → latest run → artifact `ahura-mazda-debug-apk`).
+It is signed with the debug key, so Android will ask you to allow installation
+from an unknown source; that is normal for sideloaded, self-hosted software.
+
+**Build it yourself** — Android Studio, or Gradle 8.9 + JDK 17:
 
 ```bash
 cd android
@@ -121,9 +170,14 @@ dependency resolution.
 
 In the app:
 
-1. **سرورها (Servers) → افزودن**: host/IP of your VPS, port `1080`, the stealth
-   key from the server command line, and the token (`phone-1`).  The key button
-   generates a random key if you prefer to start from the app.
+1. **سرورها (Servers) → درون‌ریزی** pastes the `ahura://…` link the installer
+   printed (or → **افزودن** to type host, port, stealth key and token by hand;
+   the obfuscation spinner offers **TLS-lookalike** (default, recommended),
+   compact `ahura/1`, or raw SOCKS5).  The same tab has the install command in
+   one tap (**دستور نصب سرور**) and **تست همه سرورها**, which probes every relay
+   and shows its handshake time in the list.  With *انتخاب خودکار سریع‌ترین
+   سرور* ticked, the app always connects to the fastest relay that answered and
+   switches to the next one if it stops answering (checked every 2 minutes).
 2. **قواعد آی‌پی (IP rules)**: pick *all traffic* or *only the listed IPs*;
    the rule editor takes one CIDR per line:
    `8.8.8.8/32` (proxy), `!192.168.0.0/16` (bypass), `block 5.5.5.5/32` (drop).
@@ -132,8 +186,9 @@ In the app:
 3. Tap **اتصال**.  The quick-settings tile and the boot receiver can also bring
    the tunnel up.
 
-Server links are shareable: `ahura://phone-1@1.2.3.4:1080?key=<hex>&obfs=ahura/1`
-(copy/import buttons in the Servers tab).
+Server links are shareable: `ahura://phone-1@1.2.3.4:1080?key=<hex>&obfs=tls`
+(copy/import buttons in the Servers tab; tapping the link in a messenger opens
+the app and adds the relay).
 
 ---
 
@@ -145,8 +200,11 @@ Server links are shareable: `ahura://phone-1@1.2.3.4:1080?key=<hex>&obfs=ahura/1
   13+, complement-routes below that).
 * **Live statistics**: upload/download, active TCP/UDP flows, total
   connections, errors, uptime.
+* **Multi-relay with auto-select and failover**: probes every relay (handshake
+  + SOCKS5 greeting, never a target connection), ranks them by handshake time,
+  and re-tests the active one every two minutes while connected.
 * **Health check**: performs the real AHURA/1 handshake against the relay and
-  reports the latency.
+  reports the latency; the result becomes that relay's latency entry.
 * **Log view** with copy/clear, export/import of the whole configuration.
 * Persian UI by default, English included.
 
@@ -166,11 +224,18 @@ PASS 300 KB round-trip through cipher (integrity)
 PASS bare SOCKS5 mode + private target refused by policy
 PASS stealth token + RFC1929 user/pass on one connection
 PASS UDP payload relayed both ways
+PASS TCP mode 'tls': handshake + CONNECT + HTTP works
+PASS TCP mode 'tls': first bytes are a TLS ClientHello header
+PASS TCP mode 'tls': payload frames use the TLS app-data header
+PASS TCP mode 'tls': padding randomises every frame size
+PASS TCP mode 'tls': codec round-trips 11 KB across record boundaries
+PASS TCP mode 'tls': compact client refused by a tls-only server
+PASS v1.0.0 clients (three-field handshake) still accepted
 PASS DPI-visible bytes contain handshake but no SOCKS5/HTTP signature
 PASS dashboard JSON stats (per-user accounting)
 PASS CIDR allow-list enforced
 PASS `python3 ahura_relay.py` CLI end-to-end
-17/17 checks passed
+24/24 checks passed
 ```
 
 The 300 KB round-trip test is not decoration: it is what caught a real
@@ -183,9 +248,18 @@ for a socket event that never came.
 ## 5. Limitations, stated plainly
 
 * `AHURA/1` is **obfuscation with a shared secret**, not a hardened
-  anti-censorship protocol.  It removes the SOCKS5 fingerprint and hides
-  payload inspection; it does not pretend to be TLS.  Keep HTTPS inside the
-  tunnel (everything does anyway).
+  anti-censorship protocol.  The `tls` mode makes the *shape* of the traffic
+  look like TLS 1.2 records (ClientHello header, `17 03 03` app-data frames,
+  randomised lengths) and defeats naive pattern matching, but it is not a real
+  TLS handshake: a censor that actively probes the port, or that fingerprints
+  the certificate-less, self-signed-less exchange, could still tell.  Keep
+  HTTPS inside the tunnel (everything does anyway).
+* Auto-select/failover costs one handshake per relay when the tunnel starts and
+  every two minutes while it runs; the probes are protected sockets and never
+  touch the tunnel, but they are visible as short-lived connections to your
+  relay — from your own IP, which is expected for a self-hosted relay.
+* Switching relays mid-session resets live connections (the TUN is rebuilt).
+  Auto-select does it only when the active relay stopped answering.
 * The TCP stack does not buffer out-of-order segments: it re-ACKs the expected
   sequence and lets the device retransmit.  On the TUN loopback path this is
   rare, and it costs efficiency, never correctness.

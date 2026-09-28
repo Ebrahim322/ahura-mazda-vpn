@@ -28,7 +28,8 @@
 | File | Responsibility |
 |---|---|
 | `core/Packet.kt` | IPv4/IPv6 + TCP/UDP parse and build, checksums, MSS option parsing, sequence arithmetic. |
-| `core/Obfs.kt` | The AHURA/1 client: handshake, HMAC-SHA256 counter-mode cipher, record framing, plus a pass-through mode for bare SOCKS5. |
+| `core/Obfs.kt` | The AHURA/1 client: handshake (with framing-mode negotiation), HMAC-SHA256 counter-mode cipher, compact **and TLS-lookalike** record framing, plus a pass-through mode for bare SOCKS5. |
+| `core/Probe.kt` | Relay probing: TCP + handshake + SOCKS5 greeting, timed. Feeds the latency column, auto-select and failover. |
 | `core/Socks5.kt` | RFC 1928/1929 client: greeting, user/pass, CONNECT (IP literals only), UDP ASSOCIATE, UDP header pack/parse. |
 | `core/Rules.kt` | `Prefix`/`IpRule`/`RuleSet`, private-range detection, prefix complement (range → CIDR), route computation. |
 | `core/TcpStack.kt` | Userspace TCP endpoints: SYN/SYN-ACK, in-order data, windows, retransmission, FIN/RST, idle timeouts. |
@@ -36,8 +37,34 @@
 | `core/Tunnel.kt` | The engine: TUN read loop, per-packet routing decision, stats, connector implementations. |
 | `core/Prefs.kt` | Settings + relay profiles (`ahura://` links). |
 | `core/Stats.kt`, `core/Log.kt` | Counters and the in-app log ring the UI reads. |
-| `service/AhuraVpnService.kt` | `VpnService`: builds the TUN, installs routes (and `excludeRoute` on Android 13+), per-app rules, foreground notification. |
+| `service/AhuraVpnService.kt` | `VpnService`: builds the TUN, installs routes (and `excludeRoute` on Android 13+), per-app rules, foreground notification, **relay auto-select and 2-minute health check / failover**. |
 | `MainActivity.kt` | The UI. |
+
+## Choosing a relay (v1.1)
+
+```
+ Servers tab ──"test all"──► ServerProbe.probeAll (background thread)
+                                  │  per relay: TCP connect → AHURA/1 handshake
+                                  │             → SOCKS5 greeting → close
+                                  ▼
+                        Prefs.latencies  ("host:port" → ms)
+                                  │
+   connect ──► autoSelect? ───────┴─► fastest reachable relay becomes active
+                                  │
+ while connected, every 2 min ─────┴─► probe the active relay (protected
+                                       socket, so it never enters the tunnel)
+                                       │  dead? → probe the others → switch
+                                       ▼        and rebuild the TUN
+```
+
+Nothing here trusts a stored IP or a profile order: a relay is only "good"
+after it answered a real handshake.  The probes are `VpnService.protect()`ed so
+they leave the phone directly even while the tunnel is up, and they never ask
+the relay to open a target connection — one round-trip per relay, no traffic.
+
+Failover rebuilds the TUN, which resets live connections.  That is the honest
+trade: it only happens when the active relay stopped answering, and the
+alternative (staying on a dead relay) is worse.
 
 ## Why the routing rules decide the *routes*
 
