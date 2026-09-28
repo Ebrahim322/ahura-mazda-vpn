@@ -37,7 +37,48 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: gradle --no-daemon assembleDebug
+        run: |
+          set -o pipefail
+          gradle --no-daemon assembleDebug 2>&1 | tee /tmp/build.log
+
+      # The build log is the only way to debug a failure from a sandbox that
+      # cannot reach the runner's blob storage, so on failure the interesting
+      # part is posted back as a commit comment.  (Only when the build fails.)
+      - name: Report build failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+
+          log = ""
+          try:
+              log = open("/tmp/build.log", encoding="utf-8", errors="replace").read()
+          except OSError:
+              pass
+          lines = log.splitlines()
+          keep = [l for l in lines if re.search(r"error:|e: |FAILURE|What went wrong|Could not|Caused by|warning: |Execution failed|> Task .*FAILED", l)]
+          tail = lines[-80:]
+          body = "### Build failed\n\n```\n" + "\n".join((keep[:120] + ["..."] + tail)[-260:])[:6000] + "\n```\n"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          sha = os.environ["GITHUB_SHA"]
+          req = urllib.request.Request(
+              "https://api.github.com/repos/%s/commits/%s/comments" % (repo, sha),
+              data=json.dumps({"body": body}).encode(),
+              headers={
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "Accept": "application/vnd.github+json",
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(req) as r:
+                  print("comment posted:", r.status)
+          except Exception as exc:  # never mask the real failure
+              print("could not post comment:", exc)
+          PY
 
       - name: Show what came out
         working-directory: android
