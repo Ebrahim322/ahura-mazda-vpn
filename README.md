@@ -66,6 +66,7 @@ server/
   tools/live_probe.py    drives the relay against the real internet
 docs/PROTOCOL.md         the wire format, byte for byte
 docs/ARCHITECTURE.md     how the client is put together and why
+docs/INSTALL-fa.md       گام‌به‌گام فارسی: APK، نصب سرور با یک خط، تنظیمات اپ
 .github/workflows/       builds the APK in the cloud (artifact + release attachment)
 ```
 
