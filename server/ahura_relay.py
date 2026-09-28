@@ -1158,6 +1158,9 @@ class RelayServer:
         if cfg.obfs != MODE_NONE and not key:
             key = secrets.token_hex(16)
             log("no stealth_key configured — generated one for this run: %s" % key, "warn")
+        # keep the textual form as well: the import link and the dashboard
+        # must hand the user exactly what the app needs to type back
+        self.stealth_key_text = key
         self.stealth_key = bytes.fromhex(key) if len(key) == 32 and all(c in "0123456789abcdefABCDEF" for c in key) else key.encode()
         self.tokens = self._parse_tokens(cfg.tokens)
 
@@ -1176,7 +1179,7 @@ class RelayServer:
         if not host:
             return ""
         return "ahura://relay@%s:%d?key=%s&token=%s&obfs=%s&name=relay" % (
-            host, self.cfg.port, self.stealth_key.decode("utf-8", "replace"),
+            host, self.cfg.port, self.stealth_key_text,
             self.first_token(), self.cfg.obfs if self.cfg.obfs != MODE_ANY else MODE_TLS)
 
     @staticmethod
@@ -1398,7 +1401,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if srv is not None:
                 snapshot["obfs"] = srv.cfg.obfs
                 snapshot["port"] = srv.cfg.port
-                snapshot["stealth_key"] = srv.stealth_key.decode("utf-8", "replace")
+                snapshot["stealth_key"] = srv.stealth_key_text
                 snapshot["import_uri"] = srv.import_uri()
             body = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
             self._send(200, "application/json; charset=utf-8", body)
