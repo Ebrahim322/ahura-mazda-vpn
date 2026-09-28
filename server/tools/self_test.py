@@ -36,7 +36,8 @@ TOKEN_USER = "mobile-01"
 RESULT: list[tuple[str, bool, str]] = []
 
 
-def check(name: str, ok: bool, detail: str = "") -> None:
+def check(name: str, ok: bool, detail="") -> None:
+    detail = str(detail)
     RESULT.append((name, bool(ok), detail))
     print("%s %s%s" % ("PASS" if ok else "FAIL", name, ("  — " + detail) if detail and not ok else ""))
 
@@ -170,7 +171,7 @@ def run_tests() -> int:
     cfg = relay.Config({
         "host": "127.0.0.1", "port": relay_port,
         "dashboard_host": "127.0.0.1", "dashboard_port": dash_port,
-        "obfs": "ahura/1", "stealth_key": STEALTH_KEY,
+        "obfs": "any", "stealth_key": STEALTH_KEY,
         "tokens": ["vip:" + TOKEN_USER],
         "allow_private": True,
         "idle_timeout": 20,
@@ -306,6 +307,101 @@ def run_tests() -> int:
         c.close()
     except Exception as exc:                                     # noqa: BLE001
         check("UDP payload relayed both ways", False, repr(exc))
+
+    # 6b — TLS-lookalike framing (mode "tls"): handshake, data, padding
+    tls_port, tls_sniff = free_port(), free_port()
+    cfg_tls = relay.Config({
+        "host": "127.0.0.1", "port": tls_port, "obfs": "tls",
+        "stealth_key": STEALTH_KEY, "tokens": [TOKEN_USER],
+        "allow_private": True, "idle_timeout": 20, "log_level": "warn",
+    })
+    relay_tls = relay.RelayServer(cfg_tls)
+    threading.Thread(target=relay_tls.serve_forever, name="relay-tls", daemon=True).start()
+    time.sleep(0.3)
+    try:
+        sniffer = SniffProxy(tls_sniff, tls_port)
+        time.sleep(0.2)
+        c = AhuraClient("127.0.0.1", tls_sniff, token=TOKEN_USER, stealth_key=STEALTH_KEY,
+                        obfs="tls").open()
+        c.connect_ip("127.0.0.1", http_port)
+        c.stream.send(b"GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+        body = b""
+        while b"hello-from-target" not in body and len(body) < 8192:
+            chunk = c.stream.recv_some(4096, timeout=10)
+            if not chunk:
+                break
+            body += chunk
+        check("TCP mode 'tls': handshake + CONNECT + HTTP works", b"hello-from-target" in body,
+              body[:80].decode("latin-1", "replace"))
+        blob = sniffer.blob()
+        check("TCP mode 'tls': first bytes are a TLS ClientHello header",
+              blob[:3] == b"\x16\x03\x01" and b"AHURA/1" not in blob[:5], blob[:16])
+        check("TCP mode 'tls': payload frames use the TLS app-data header",
+              b"\x17\x03\x03" in blob, "%d bytes captured" % len(blob))
+        c.close()
+    except Exception as exc:                                     # noqa: BLE001
+        check("TCP mode 'tls': handshake + CONNECT + HTTP works", False, repr(exc))
+
+    # 6c — the frame codec: random padding, round-trip across record boundaries
+    try:
+        frame_key = bytes.fromhex(STEALTH_KEY)
+        sizes = set()
+        probe = relay.RecordStream(socket.socket(), frame_key, frame_key, relay.MODE_TLS)
+        for _ in range(24):
+            sizes.add(len(probe._encode(b"x" * 128)))
+        plain = relay.RecordStream(socket.socket(), frame_key, frame_key, relay.MODE_AHURA)
+        plain_size = len(plain._encode(b"x" * 128))
+        check("TCP mode 'tls': padding randomises every frame size",
+              len(sizes) > 1 and plain_size == 130,
+              "tls sizes=%s plain=%d" % (sorted(sizes)[:4], plain_size))
+        a, b = socket.socketpair()
+        tx = relay.RecordStream(a, frame_key, frame_key, relay.MODE_TLS)
+        rx = relay.RecordStream(b, frame_key, frame_key, relay.MODE_TLS)
+        payload = b"".join([os.urandom(3000), b"y" * 8192, b"z" * 33])
+        tx.send_all(payload)
+        got = rx.read_exact(len(payload))
+        check("TCP mode 'tls': codec round-trips 11 KB across record boundaries",
+              got == payload, "got %d of %d" % (len(got), len(payload)))
+        tx.close()
+        rx.close()
+        probe.close()
+        plain.close()
+    except Exception as exc:                                     # noqa: BLE001
+        check("TCP mode 'tls': codec round-trips 11 KB across record boundaries", False, repr(exc))
+
+    # 6d — framing/mode mismatches are refused, v1.0.0 clients keep working
+    try:
+        c = AhuraClient("127.0.0.1", tls_port, token=TOKEN_USER, stealth_key=STEALTH_KEY,
+                        obfs="ahura/1").open()
+        check("TCP mode 'tls': compact client refused by a tls-only server", False, "accepted")
+        c.close()
+    except AhuraError as exc:
+        check("TCP mode 'tls': compact client refused by a tls-only server",
+              "mode" in str(exc), str(exc))
+    except Exception as exc:                                     # noqa: BLE001
+        check("TCP mode 'tls': compact client refused by a tls-only server", False, repr(exc))
+
+    try:
+        sock = socket.create_connection(("127.0.0.1", relay_port), timeout=10)
+        nonce = os.urandom(16)
+        sock.sendall(("AHURA/1 %s %s\n" % (nonce.hex(), TOKEN_USER)).encode())
+        line = bytearray()
+        while not line.endswith(b"\n") and len(line) < 160:
+            ch = sock.recv(1)
+            if not ch:
+                break
+            line.extend(ch)
+        from ahura_client import derive_keys
+        k_c2s, k_s2c = derive_keys(bytes.fromhex(STEALTH_KEY), nonce)
+        legacy = AhuraStream(sock, k_c2s, k_s2c, "ahura/1")
+        legacy.send(b"\x05\x01\x00")
+        greeted = legacy.recv_exact(2) == b"\x05\x00"
+        check("v1.0.0 clients (three-field handshake) still accepted",
+              bytes(line).startswith(b"AHURA/1 OK ahura/1") and greeted,
+              bytes(line).strip().decode("latin-1", "replace"))
+        sock.close()
+    except Exception as exc:                                     # noqa: BLE001
+        check("v1.0.0 clients (three-field handshake) still accepted", False, repr(exc))
 
     # 7 — traffic on the wire carries no SOCKS5 / HTTP signature
     try:

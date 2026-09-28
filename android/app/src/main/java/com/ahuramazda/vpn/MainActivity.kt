@@ -31,6 +31,7 @@ import com.ahuramazda.vpn.core.Prefs
 import com.ahuramazda.vpn.core.RuleSet
 import com.ahuramazda.vpn.core.RulesText
 import com.ahuramazda.vpn.core.ServerProfile
+import com.ahuramazda.vpn.core.ServerProbe
 import com.ahuramazda.vpn.core.Socks5Client
 import com.ahuramazda.vpn.core.Stats
 import com.ahuramazda.vpn.service.AhuraVpnService
@@ -64,7 +65,9 @@ class MainActivity : Activity() {
     // servers
     private lateinit var serverList: ListView
     private lateinit var serverAdapter: ArrayAdapter<String>
+    private lateinit var autoSelectBox: CheckBox
     private var serverItems: List<ServerProfile> = emptyList()
+    private var serversBusy = false
 
     // rules
     private lateinit var modeAll: RadioButton
@@ -127,6 +130,7 @@ class MainActivity : Activity() {
         serverAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_single_choice, ArrayList<String>())
         serverList.adapter = serverAdapter
         serverList.choiceMode = ListView.CHOICE_MODE_SINGLE
+        autoSelectBox = findViewById(R.id.autoSelectBox)
 
         modeAll = findViewById(R.id.modeAll)
         modeList = findViewById(R.id.modeList)
@@ -157,6 +161,9 @@ class MainActivity : Activity() {
 
         versionLabel.text = getString(R.string.version_line, packageName, BuildConfigCompat.versionName(this))
         handler.post(ticker)
+        // `ahura://…` link from the installer / a messenger: add the relay and
+        // jump straight to the servers tab.
+        handleDeepLink(intent)
     }
 
     override fun onResume() {
@@ -235,22 +242,26 @@ class MainActivity : Activity() {
     }
 
     private fun runHealthCheck() {
-        val cfg = prefs.tunnelConfig()
+        val profile = prefs.activeProfile()
+        if (profile.host.isEmpty()) {
+            toast(getString(R.string.need_server))
+            return
+        }
         healthResult.text = getString(R.string.checking)
         Thread({
-            val started = System.currentTimeMillis()
-            val text = try {
-                val conn = ObfsStream.connect(
-                    cfg.serverHost, cfg.serverPort, cfg.stealthKey, cfg.token, cfg.obfs, 8000, 8000
-                )
-                val socks = Socks5Client(conn)
-                socks.negotiate(cfg.username, cfg.password)
-                conn.close()
-                getString(R.string.check_ok, (System.currentTimeMillis() - started).toInt(), cfg.obfs)
-            } catch (e: Exception) {
-                getString(R.string.check_failed, e.message ?: e.javaClass.simpleName)
+            // Same path the tunnel takes: TCP, AHURA/1 handshake, SOCKS5
+            // greeting.  The result doubles as this relay's latency entry.
+            val result = ServerProbe.probe(profile, 8000) { socket -> AhuraVpnService.protectSocket(socket) }
+            prefs.noteLatency(profile, if (result.ok) result.millis else -1)
+            val text = if (result.ok) {
+                getString(R.string.check_ok, result.millis, profile.obfs)
+            } else {
+                getString(R.string.check_failed, result.message)
             }
-            runOnUiThread { healthResult.text = text }
+            runOnUiThread {
+                healthResult.text = text
+                refreshServers()
+            }
         }, "ahura-health").start()
     }
 
@@ -285,6 +296,12 @@ class MainActivity : Activity() {
             if (profile.host.isEmpty()) toast(getString(R.string.need_server))
             else copyToClipboard(profile.uri(), getString(R.string.copied_link))
         }
+        findViewById<Button>(R.id.testServersButton).setOnClickListener { probeAllServers() }
+        findViewById<Button>(R.id.installServerButton).setOnClickListener {
+            copyToClipboard(getString(R.string.install_command), getString(R.string.copied_install))
+        }
+        autoSelectBox.isChecked = prefs.autoSelect
+        autoSelectBox.setOnCheckedChangeListener { _, checked -> prefs.autoSelect = checked }
         findViewById<Button>(R.id.importServerButton).setOnClickListener {
             val text = readClipboard()
             val profile = if (text == null) null else ServerProfile.parse(text)
@@ -331,7 +348,13 @@ class MainActivity : Activity() {
             key.setText(ObfsStream.randomHex(16))
             token.setText("phone-1")
         }
-        obfs.setSelection(if (existing?.obfs == ObfsStream.MODE_NONE) 1 else 0)
+        obfs.setSelection(
+            when (existing?.obfs) {
+                ObfsStream.MODE_AHURA -> 1
+                ObfsStream.MODE_NONE -> 2
+                else -> 0            // MODE_TLS — also the default for a new relay
+            }
+        )
 
         view.findViewById<Button>(R.id.dlgGenerateKey).setOnClickListener {
             key.setText(ObfsStream.randomHex(16))
@@ -347,7 +370,11 @@ class MainActivity : Activity() {
                     port = port.text.toString().toIntOrNull() ?: 1080,
                     stealthKey = key.text.toString().trim(),
                     token = token.text.toString().trim(),
-                    obfs = if (obfs.selectedItemPosition == 1) ObfsStream.MODE_NONE else ObfsStream.MODE_AHURA,
+                    obfs = when (obfs.selectedItemPosition) {
+                        1 -> ObfsStream.MODE_AHURA
+                        2 -> ObfsStream.MODE_NONE
+                        else -> ObfsStream.MODE_TLS
+                    },
                     username = user.text.toString().trim(),
                     password = pass.text.toString()
                 )
@@ -366,13 +393,87 @@ class MainActivity : Activity() {
     private fun refreshServers() {
         serverItems = prefs.profiles
         serverAdapter.clear()
-        serverItems.forEach { serverAdapter.add(it.label()) }
+        serverItems.forEach { serverAdapter.add(it.label() + "  ·  " + latencyText(it)) }
         serverAdapter.notifyDataSetChanged()
         val active = prefs.activeIndex
         if (active in serverItems.indices) {
             serverList.setItemChecked(active, true)
         }
-        serverLabel.text = getString(R.string.active_server, prefs.activeProfile().label())
+        serverLabel.text = getString(R.string.active_server, activeLabel())
+    }
+
+    /** "42 ms" / "no reply yet" — shown next to every relay in the list. */
+    private fun latencyText(profile: ServerProfile): String {
+        if (serversBusy) return getString(R.string.latency_testing)
+        val ms = prefs.latencyOf(profile)
+        return if (ms >= 0) getString(R.string.latency_ms, ms) else getString(R.string.latency_unknown)
+    }
+
+    private fun activeLabel(): String {
+        val profile = prefs.activeProfile()
+        val ms = prefs.latencyOf(profile)
+        return if (ms >= 0) profile.label() + " · " + getString(R.string.latency_ms, ms) else profile.label()
+    }
+
+    /**
+     * Probes every configured relay (handshake + SOCKS5 greeting each), keeps
+     * the measured times in settings and — when auto-select is on — makes the
+     * fastest reachable relay the active one.
+     */
+    private fun probeAllServers() {
+        val profiles = prefs.profiles
+        if (profiles.isEmpty()) {
+            toast(getString(R.string.need_server))
+            return
+        }
+        if (serversBusy) return
+        serversBusy = true
+        refreshServers()
+        toast(getString(R.string.testing_servers, profiles.size))
+        Thread({
+            val best = try {
+                ServerProbe.probeAll(prefs, 5000) { socket -> AhuraVpnService.protectSocket(socket) }
+            } catch (e: Exception) {
+                Log.e("probing relays failed", e)
+                -1
+            }
+            if (prefs.autoSelect) {
+                prefs.activeIndex = if (best >= 0) best else prefs.bestProfileIndex()
+            }
+            serversBusy = false
+            runOnUiThread {
+                refreshServers()
+                refresh()
+                val all = prefs.profiles
+                val index = prefs.activeIndex
+                toast(
+                    if (best >= 0 && index in all.indices) {
+                        getString(R.string.best_server, all[index].label(), prefs.latencyOf(all[index]))
+                    } else {
+                        getString(R.string.no_server_answered)
+                    }
+                )
+            }
+        }, "ahura-probe").start()
+    }
+
+    /** Adds a relay that arrived as an `ahura://…` link. */
+    private fun handleDeepLink(intent: Intent?) {
+        val data = intent?.data?.toString() ?: return
+        if (!data.startsWith("ahura://", ignoreCase = true)) return
+        val profile = ServerProfile.parse(data)
+        if (profile == null || profile.host.isEmpty()) {
+            toast(getString(R.string.import_failed))
+            return
+        }
+        val all = ArrayList(prefs.profiles)
+        all.add(profile)
+        prefs.profiles = all
+        prefs.activeIndex = all.size - 1
+        refreshServers()
+        flipper.displayedChild = 1
+        updateTabs()
+        toast(getString(R.string.link_added, profile.label()))
     }
 
     // ------------------------------------------------------------------
@@ -608,7 +709,7 @@ class MainActivity : Activity() {
         statusLabel.text = getString(if (connected) R.string.status_connected else R.string.status_disconnected)
         statusLabel.setTextColor(getColorCompat(if (connected) R.color.ahura_ok else R.color.ahura_muted))
         toggleButton.text = getString(if (connected) R.string.disconnect else R.string.connect)
-        serverLabel.text = getString(R.string.active_server, prefs.activeProfile().label())
+        serverLabel.text = getString(R.string.active_server, activeLabel())
 
         val stats = AhuraVpnService.stats
         statUpload.text = getString(R.string.stat_upload, Stats.human(stats.uploadedBytes))

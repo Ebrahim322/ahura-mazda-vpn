@@ -40,7 +40,10 @@ import javax.crypto.spec.SecretKeySpec
 class ObfsStream private constructor(
     val socket: Socket,
     private val encKey: ByteArray?,
-    private val decKey: ByteArray?
+    private val decKey: ByteArray?,
+    /** Framing mode: MODE_TLS wraps every record in a TLS-shaped frame,
+     *  MODE_AHURA is the compact framing, MODE_NONE is a bare stream. */
+    val mode: String = MODE_AHURA
 ) {
 
     private val input: InputStream = socket.getInputStream()
@@ -103,15 +106,33 @@ class ObfsStream private constructor(
         var done = 0
         while (done < len) {
             val take = if (len - done > MAX_RECORD) MAX_RECORD else len - done
+            val framed = mode == MODE_TLS
+            val pad = if (framed) random.nextInt(MAX_PAD + 1) else 0
+            val head = if (framed) TLS_HEADER else 2
+            val need = head + 2 + take + pad
             var sc = scratch
-            if (sc == null || sc.size < take + 2) {
-                sc = ByteArray(MAX_RECORD + 2)
+            if (sc == null || sc.size < need) {
+                sc = ByteArray(MAX_RECORD + 2 + MAX_PAD + TLS_HEADER + 2)
                 scratch = sc
             }
-            sc[0] = ((take ushr 8) and 0xFF).toByte()
-            sc[1] = (take and 0xFF).toByte()
-            encCounter = crypt(encMac!!, encCounter, buf, off + done, take, sc, 2)
-            output.write(sc, 0, take + 2)
+            if (framed) {
+                val outer = take + 2 + pad
+                sc[0] = 0x17
+                sc[1] = 0x03
+                sc[2] = 0x03
+                sc[3] = ((outer ushr 8) and 0xFF).toByte()
+                sc[4] = (outer and 0xFF).toByte()
+            }
+            sc[head] = ((take ushr 8) and 0xFF).toByte()
+            sc[head + 1] = (take and 0xFF).toByte()
+            encCounter = crypt(encMac!!, encCounter, buf, off + done, take, sc, head + 2)
+            if (pad > 0) {
+                // Padding is thrown away by the peer; fill it with fresh noise
+                // instead of leaving stale bytes of the previous record there.
+                random.nextBytes(padBytes)
+                System.arraycopy(padBytes, 0, sc, head + 2 + take, pad)
+            }
+            output.write(sc, 0, need)
             done += take
         }
     }
@@ -159,6 +180,29 @@ class ObfsStream private constructor(
             pending = buf
             pendingOff = 0
             pendingEnd = n
+            return true
+        }
+        if (mode == MODE_TLS) {
+            val frameHead = ByteArray(TLS_HEADER)
+            if (readRaw(frameHead, TLS_HEADER) < TLS_HEADER) return false
+            val type = frameHead[0].toInt() and 0xFF
+            if (type != 0x16 && type != 0x17) throw IOException("AHURA/1: bad frame type $type")
+            if ((frameHead[1].toInt() and 0xFF) != 0x03) throw IOException("AHURA/1: bad frame version")
+            val outer = ((frameHead[3].toInt() and 0xFF) shl 8) or (frameHead[4].toInt() and 0xFF)
+            if (outer < 2 || outer > MAX_RECORD + 2 + MAX_PAD) {
+                throw IOException("AHURA/1: bad frame length $outer")
+            }
+            val frame = ByteArray(outer)
+            if (readRaw(frame, outer) < outer) return false
+            // inside: <uint16 len><cipher> followed by padding we ignore
+            val length = ((frame[0].toInt() and 0xFF) shl 8) or (frame[1].toInt() and 0xFF)
+            if (length <= 0 || length > MAX_RECORD) {
+                throw IOException("AHURA/1: bad record length $length (wrong stealth key?)")
+            }
+            decCounter = crypt(decMac!!, decCounter, frame, 2, length, frame, 0)
+            pending = frame
+            pendingOff = 0
+            pendingEnd = length
             return true
         }
         val head = ByteArray(2)
@@ -211,10 +255,17 @@ class ObfsStream private constructor(
 
     companion object {
         const val MODE_AHURA = "ahura/1"
+        const val MODE_TLS = "tls"
         const val MODE_NONE = "none"
 
+        /** Every mode the app knows how to speak, best first. */
+        val MODES = listOf(MODE_TLS, MODE_AHURA, MODE_NONE)
+
         private const val MAX_RECORD = 8192
+        private const val MAX_PAD = 64
+        private const val TLS_HEADER = 5
         private const val READ_CHUNK = 16384
+        private val padBytes = ByteArray(MAX_PAD)
         private const val PROTO = "AHURA/1"
         private val random = SecureRandom()
 
@@ -232,17 +283,31 @@ class ObfsStream private constructor(
             val socket = Socket()
             socket.tcpNoDelay = true
             socket.connect(InetSocketAddress(host, port), connectTimeoutMs)
+            return handshake(socket, stealthKey, token, mode, readTimeoutMs)
+        }
+
+        /** Runs the AHURA/1 handshake on an already-connected socket. */
+        fun handshake(
+            socket: Socket,
+            stealthKey: String,
+            token: String,
+            mode: String,
+            readTimeoutMs: Int = 30000
+        ): ObfsStream {
             socket.soTimeout = readTimeoutMs
-            if (mode != MODE_AHURA) return ObfsStream(socket, null, null)
+            if (mode != MODE_AHURA && mode != MODE_TLS) return ObfsStream(socket, null, null, MODE_NONE)
 
             val nonce = ByteArray(16)
             random.nextBytes(nonce)
-            val hello = ("$PROTO ${nonce.toHex()} " + (if (token.isEmpty()) "-" else token) + "\n")
+            val hello = ("$PROTO ${nonce.toHex()} " + (if (token.isEmpty()) "-" else token) + " $mode\n")
                 .toByteArray(Charsets.US_ASCII)
-            socket.getOutputStream().write(hello)
-            socket.getOutputStream().flush()
+            val out = socket.getOutputStream()
+            // In tls mode the very first bytes the relay (or a censor) sees are
+            // 16 03 01 …, i.e. the beginning of a plain TLS ClientHello.
+            if (mode == MODE_TLS) out.write(tlsFrame(hello, 0x16, 0x01)) else out.write(hello)
+            out.flush()
 
-            val reply = readPlainLine(socket, 160)
+            val reply = if (mode == MODE_TLS) readTlsLine(socket) else readPlainLine(socket, 160)
             if (!reply.startsWith("$PROTO OK")) {
                 socket.close()
                 throw IOException("relay refused handshake: ${reply.trim()}")
@@ -251,7 +316,55 @@ class ObfsStream private constructor(
             val master = hmac(key, ("ahura/v1".toByteArray(Charsets.US_ASCII) + nonce))
             val c2s = hmac(master, "c2s".toByteArray(Charsets.US_ASCII))
             val s2c = hmac(master, "s2c".toByteArray(Charsets.US_ASCII))
-            return ObfsStream(socket, c2s, s2c)
+            return ObfsStream(socket, c2s, s2c, mode)
+        }
+
+        /** One TLS-shaped record: header, payload, random padding. */
+        fun tlsFrame(payload: ByteArray, contentType: Int, minor: Int): ByteArray {
+            val pad = random.nextInt(MAX_PAD + 1)
+            val body = ByteArray(payload.size + pad)
+            System.arraycopy(payload, 0, body, 0, payload.size)
+            if (pad > 0) {
+                random.nextBytes(padBytes)
+                System.arraycopy(padBytes, 0, body, payload.size, pad)
+            }
+            val frame = ByteArray(TLS_HEADER + body.size)
+            frame[0] = contentType.toByte()
+            frame[1] = 0x03
+            frame[2] = minor.toByte()
+            frame[3] = ((body.size ushr 8) and 0xFF).toByte()
+            frame[4] = (body.size and 0xFF).toByte()
+            System.arraycopy(body, 0, frame, TLS_HEADER, body.size)
+            return frame
+        }
+
+        /** Reads one TLS-shaped reply record and returns the line inside it. */
+        private fun readTlsLine(socket: Socket): String {
+            val input = socket.getInputStream()
+            val head = ByteArray(TLS_HEADER)
+            if (readFully(input, head, TLS_HEADER) < TLS_HEADER) return ""
+            val outer = ((head[3].toInt() and 0xFF) shl 8) or (head[4].toInt() and 0xFF)
+            if (outer <= 0 || outer > 4096) return ""
+            val body = ByteArray(outer)
+            if (readFully(input, body, outer) < outer) return ""
+            var end = body.size
+            for (i in body.indices) {
+                if (body[i] == '\n'.code.toByte()) {
+                    end = i
+                    break
+                }
+            }
+            return String(body, 0, end, Charsets.US_ASCII)
+        }
+
+        private fun readFully(input: InputStream, buf: ByteArray, len: Int): Int {
+            var got = 0
+            while (got < len) {
+                val n = input.read(buf, got, len - got)
+                if (n <= 0) return got
+                got += n
+            }
+            return got
         }
 
         private fun readPlainLine(socket: Socket, max: Int): String {

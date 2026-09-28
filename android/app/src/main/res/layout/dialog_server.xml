@@ -67,6 +67,14 @@
             android:textColor="@color/ahura_text"
             android:textDirection="ltr" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/obfs_hint"
+            android:textColor="@color/ahura_muted"
+            android:textSize="12sp" />
+
         <Spinner
             android:id="@+id/dlgObfs"
             android:layout_width="match_parent"

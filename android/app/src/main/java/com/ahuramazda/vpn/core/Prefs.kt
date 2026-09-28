@@ -156,6 +156,55 @@ class Prefs(context: Context) {
         get() = prefs.getStringSet(KEY_APP_LIST, emptySet()) ?: emptySet()
         set(value) = prefs.edit().putStringSet(KEY_APP_LIST, value).apply()
 
+    /** Connect to the fastest relay that answers a probe (multi-server). */
+    var autoSelect: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_SELECT, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_SELECT, value).apply()
+
+    /** Last measured handshake time per relay, keyed by `host:port` (ms). */
+    var latencies: Map<String, Int>
+        get() {
+            val raw = prefs.getStringSet(KEY_LATENCY, emptySet()) ?: emptySet()
+            val out = HashMap<String, Int>()
+            for (entry in raw) {
+                val eq = entry.lastIndexOf('=')
+                if (eq <= 0) continue
+                val ms = entry.substring(eq + 1).toIntOrNull() ?: continue
+                out[entry.substring(0, eq)] = ms
+            }
+            return out
+        }
+        set(value) = prefs.edit()
+            .putStringSet(KEY_LATENCY, value.map { (key, ms) -> "$key=$ms" }.toSet())
+            .apply()
+
+    /** Measured latency of a relay, or -1 when it has not answered yet. */
+    fun latencyOf(profile: ServerProfile): Int = latencies[keyOf(profile)] ?: -1
+
+    /** Records a measurement; a negative value removes the entry (unreachable). */
+    fun noteLatency(profile: ServerProfile, millis: Int) {
+        val map = HashMap(latencies)
+        if (millis >= 0) map[keyOf(profile)] = millis else map.remove(keyOf(profile))
+        latencies = map
+    }
+
+    /** Index (in `profiles`) of the measured relay with the smallest latency. */
+    fun bestProfileIndex(): Int {
+        val all = profiles
+        if (all.isEmpty()) return 0
+        val measured = latencies
+        var best = -1
+        var bestMs = Int.MAX_VALUE
+        all.forEachIndexed { index, profile ->
+            val ms = measured[keyOf(profile)]
+            if (ms != null && ms in 0 until bestMs) {
+                bestMs = ms
+                best = index
+            }
+        }
+        return if (best >= 0) best else activeIndex.coerceIn(0, all.size - 1)
+    }
+
     var debugEnabled: Boolean
         get() = prefs.getBoolean(KEY_DEBUG, false)
         set(value) {
@@ -221,6 +270,9 @@ class Prefs(context: Context) {
 
         const val DEFAULT_IP_LIST = "1.1.1.0/24\n8.8.8.0/24\n9.9.9.0/24"
 
+        /** How a relay is identified in the latency table. */
+        fun keyOf(profile: ServerProfile): String = profile.host + ":" + profile.port
+
         private const val KEY_PROFILES = "profiles"
         private const val KEY_ACTIVE = "active_profile"
         private const val KEY_MODE = "mode"
@@ -235,6 +287,8 @@ class Prefs(context: Context) {
         private const val KEY_APP_MODE = "app_mode"
         private const val KEY_APP_LIST = "app_list"
         private const val KEY_DEBUG = "debug"
+        private const val KEY_AUTO_SELECT = "auto_select"
+        private const val KEY_LATENCY = "latency"
     }
 }
 

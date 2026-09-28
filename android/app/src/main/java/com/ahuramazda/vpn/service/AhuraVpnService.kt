@@ -18,10 +18,12 @@ import com.ahuramazda.vpn.core.IpPrefixCompat
 import com.ahuramazda.vpn.core.Log
 import com.ahuramazda.vpn.core.Prefs
 import com.ahuramazda.vpn.core.RuleSet
+import com.ahuramazda.vpn.core.ServerProbe
 import com.ahuramazda.vpn.core.Stats
 import com.ahuramazda.vpn.core.Tunnel
 import com.ahuramazda.vpn.core.TunnelConfig
 import java.net.InetAddress
+import java.net.Socket
 
 /**
  * The always-on piece of the app: owns the TUN device, the engine, the
@@ -42,6 +44,7 @@ class AhuraVpnService : VpnService() {
         const val ACTION_STOP = "com.ahuramazda.vpn.action.STOP"
         const val ACTION_TOGGLE = "com.ahuramazda.vpn.action.TOGGLE"
 
+        private const val HEALTH_PERIOD_MS = 120_000L
         private const val CHANNEL_ID = "ahura-status"
         private const val NOTIFICATION_ID = 4711
         private const val TUN_ADDRESS_V4 = "10.111.0.2"
@@ -56,6 +59,21 @@ class AhuraVpnService : VpnService() {
             private set
 
         val stats = Stats()
+
+        /**
+         * `VpnService.protect()` for sockets opened outside the service — the
+         * relay probes.  Without it a probe taken while the tunnel is up would
+         * be routed into the tunnel it is trying to measure.  Returns false
+         * when no tunnel is running (nothing to protect from).
+         */
+        fun protectSocket(socket: Socket): Boolean {
+            val service = instance ?: return false
+            return try {
+                service.protect(socket)
+            } catch (e: Exception) {
+                false
+            }
+        }
 
         fun start(context: Context) {
             val intent = Intent(context, AhuraVpnService::class.java).setAction(ACTION_START)
@@ -82,9 +100,18 @@ class AhuraVpnService : VpnService() {
     private var lastDown = 0L
     private var lastTick = 0L
 
+    @Volatile
+    private var starting = false
+
+    @Volatile
+    private var healthBusy = false
+
+    private var lastHealthCheck = 0L
+
     private val ticker = object : Runnable {
         override fun run() {
             updateNotification()
+            maybeHealthCheck()
             handler.postDelayed(this, 1000)
         }
     }
@@ -117,17 +144,53 @@ class AhuraVpnService : VpnService() {
     // ------------------------------------------------------------------
 
     private fun startTunnel() {
-        if (connected) {
-            Log.i("already connected")
+        if (connected || starting) {
+            Log.i("already connected / connecting")
             return
         }
         Log.debugEnabled = Prefs(this).debugEnabled
         val prefs = Prefs(this)
-        val profile = prefs.activeProfile()
-        if (profile.host.isEmpty()) {
+        if (prefs.activeProfile().host.isEmpty()) {
             Log.e("no relay configured — add a server first")
             return
         }
+        if (prefs.autoSelect && prefs.profiles.size > 1) {
+            // Ranking relays is a handful of TCP round-trips, so it runs off
+            // the main thread.  The notification goes up first: the user sees
+            // "connecting" while the probes decide which relay to use.
+            starting = true
+            startForegroundNotification()
+            Thread({
+                var best = -1
+                try {
+                    best = ServerProbe.probeAll(prefs, 4000, null)
+                } catch (e: Exception) {
+                    Log.e("relay probing failed", e)
+                }
+                val chosen = best
+                handler.post {
+                    starting = false
+                    if (chosen >= 0) {
+                        prefs.activeIndex = chosen
+                        Log.i(
+                            "auto-select: " + prefs.activeProfile().label() +
+                                " (" + prefs.latencyOf(prefs.activeProfile()) + " ms)"
+                        )
+                    } else {
+                        Log.w("auto-select: no relay answered — trying ${prefs.activeProfile().label()} anyway")
+                    }
+                    startTunnelNow(prefs)
+                }
+            }, "ahura-autoselect").start()
+            return
+        }
+        startTunnelNow(prefs)
+    }
+
+    /** Builds the TUN device and starts the engine on the selected relay. */
+    private fun startTunnelNow(prefs: Prefs) {
+        if (connected) return
+        val profile = prefs.activeProfile()
         val config = prefs.tunnelConfig()
 
         startForegroundNotification()
@@ -235,6 +298,7 @@ class AhuraVpnService : VpnService() {
     }
 
     private fun stopTunnel(reason: String) {
+        starting = false
         if (!connected && device == null && tunnel == null) {
             stopForegroundNow()
             return
@@ -251,6 +315,59 @@ class AhuraVpnService : VpnService() {
         handler.removeCallbacks(ticker)
         stopForegroundNow()
         Log.i("disconnected ($reason)")
+    }
+
+    // ------------------------------------------------------------------
+    // relay health + failover
+    // ------------------------------------------------------------------
+
+    /**
+     * Every [HEALTH_PERIOD_MS] the active relay is probed for real (handshake
+     * included).  If it stopped answering — a blocked IP, a dead VPS, a
+     * throttled path — and another configured relay is alive, the tunnel is
+     * re-established on the fastest one.  This is the multi-server payoff:
+     * one relay dies, the phone moves to the next without user action.
+     */
+    private fun maybeHealthCheck() {
+        if (!connected || healthBusy || starting) return
+        if (System.currentTimeMillis() - lastHealthCheck < HEALTH_PERIOD_MS) return
+        lastHealthCheck = System.currentTimeMillis()
+        healthBusy = true
+        val prefs = Prefs(this)
+        Thread({
+            try {
+                val active = prefs.activeProfile()
+                val result = ServerProbe.probe(active, 4000) { socket -> protectSocket(socket) }
+                prefs.noteLatency(active, if (result.ok) result.millis else -1)
+                if (result.ok) {
+                    Log.d("health: ${active.label()} ${result.millis} ms")
+                    return@Thread
+                }
+                Log.w("health: ${active.label()} did not answer (${result.message})")
+                if (!prefs.autoSelect || prefs.profiles.size < 2) return@Thread
+                val best = ServerProbe.probeAll(prefs, 4000) { socket -> protectSocket(socket) }
+                if (best < 0) {
+                    Log.w("failover: no other relay answered either")
+                    return@Thread
+                }
+                prefs.activeIndex = best
+                Log.w("failover: moving to ${prefs.activeProfile().label()}")
+                handler.post { restartTunnel() }
+            } catch (e: Exception) {
+                Log.e("health check failed", e)
+            } finally {
+                healthBusy = false
+            }
+        }, "ahura-health").start()
+    }
+
+    private fun restartTunnel() {
+        if (!connected) {
+            startTunnel()
+            return
+        }
+        stopTunnel("relay failover")
+        handler.postDelayed({ startTunnel() }, 600)
     }
 
     // ------------------------------------------------------------------

@@ -10,6 +10,13 @@
         android:layout_height="wrap_content"
         android:text="@string/section_servers" />
 
+    <CheckBox
+        android:id="@+id/autoSelectBox"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/auto_select"
+        android:textColor="@color/ahura_text" />
+
     <ListView
         android:id="@+id/serverList"
         android:layout_width="match_parent"
@@ -62,6 +69,36 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/import_clipboard" />
+
+            <Button
+                android:id="@+id/testServersButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/test_servers" />
+
+            <Button
+                android:id="@+id/installServerButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/install_server" />
         </LinearLayout>
     </HorizontalScrollView>
+
+    <TextView
+        style="@style/AhuraMuted"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/install_hint" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="4dp"
+        android:text="@string/install_command"
+        android:textColor="@color/ahura_muted"
+        android:textDirection="ltr"
+        android:textSize="11sp"
+        android:typeface="monospace" />
 </LinearLayout>

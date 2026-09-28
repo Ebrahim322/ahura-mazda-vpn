@@ -64,6 +64,7 @@ import hmac
 import ipaddress
 import json
 import os
+import random
 import secrets
 import select
 import selectors
@@ -76,13 +77,28 @@ import time
 from collections import Counter, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 PROTO_NAME = "AHURA/1"
 HANDSHAKE_MAX = 256
 MAX_RECORD = 8192          # plaintext bytes per obfuscated record
+MAX_PAD = 64               # random padding inside a TLS-lookalike frame
 RELAY_BUFFER = 65536
 UDP_MAX_DATAGRAM = 65535
 MAX_BUFFERED = 1 << 20      # per direction, bounds relay memory per session
+
+# Framing modes.  Both encrypted modes use the same handshake and the same
+# keystream — they differ only in how records are put on the wire:
+#
+#   ahura/1 : <uint16 len><cipher>                       (compact)
+#   tls     : 17 03 03 <uint16 outer> [<uint16 len><cipher><random pad>]
+#             — every frame looks like one TLS application-data record, the
+#               outer length is randomised by the padding, and the first bytes
+#               the client ever sends are 16 03 01 …, i.e. a ClientHello.
+MODE_AHURA = "ahura/1"
+MODE_TLS = "tls"
+MODE_NONE = "none"
+MODE_ANY = "any"
+MODES_ENCRYPTED = (MODE_AHURA, MODE_TLS)
 
 
 # --------------------------------------------------------------------------
@@ -154,10 +170,12 @@ class RecordStream:
       dead-locks there — that bug is what the 300 KB round-trip test catches).
     """
 
-    def __init__(self, sock: socket.socket, enc_key: bytes | None, dec_key: bytes | None):
+    def __init__(self, sock: socket.socket, enc_key: bytes | None, dec_key: bytes | None,
+                 mode: str = MODE_AHURA):
         self.sock = sock
         self.enc_key = enc_key
         self.dec_key = dec_key
+        self.mode = mode
         self._enc_ctr = 0
         self._dec_ctr = 0
         self._inbuf = bytearray()     # decoded plaintext, not yet consumed
@@ -172,6 +190,12 @@ class RecordStream:
     def has_pending_out(self) -> bool:
         return bool(self._out) or self._fin
 
+    def _frame(self, payload: bytes) -> bytes:
+        """Wrap `payload` in one TLS application-data record + random padding."""
+        pad = os.urandom(random.randint(0, MAX_PAD))
+        body = payload + pad
+        return b"\x17\x03\x03" + struct.pack("!H", len(body)) + body
+
     def _encode(self, data: bytes) -> bytes:
         if self.enc_key is None:
             return data
@@ -181,15 +205,32 @@ class RecordStream:
             chunk = data[off:off + MAX_RECORD]
             off += len(chunk)
             cipher, self._enc_ctr = xor_keystream(self.enc_key, self._enc_ctr, chunk)
-            out.append(struct.pack("!H", len(cipher)))
-            out.append(cipher)
+            record = struct.pack("!H", len(cipher)) + cipher
+            out.append(self._frame(record) if self.mode == MODE_TLS else record)
         return b"".join(out)
+
+    def _needed_raw(self) -> int:
+        """How many more raw bytes are needed before `_decode` can progress."""
+        if self.enc_key is None:
+            return 1
+        if self.mode == MODE_TLS:
+            if len(self._raw) < 5:
+                return 5 - len(self._raw)
+            outer = struct.unpack("!H", bytes(self._raw[3:5]))[0]
+            return max(0, 5 + outer - len(self._raw))
+        if len(self._raw) < 2:
+            return 2 - len(self._raw)
+        length = struct.unpack("!H", bytes(self._raw[:2]))[0]
+        return max(0, 2 + length - len(self._raw))
 
     def _decode(self) -> None:
         """Turn whatever raw bytes we hold into plaintext."""
         if self.enc_key is None:
             self._inbuf.extend(self._raw)
             self._raw.clear()
+            return
+        if self.mode == MODE_TLS:
+            self._decode_tls()
             return
         while len(self._raw) >= 2:
             length = struct.unpack("!H", self._raw[:2])[0]
@@ -200,6 +241,26 @@ class RecordStream:
             body = bytes(self._raw[2:2 + length])
             del self._raw[:2 + length]
             plain, self._dec_ctr = xor_keystream(self.dec_key, self._dec_ctr, body)
+            self._inbuf.extend(plain)
+
+    def _decode_tls(self) -> None:
+        """Undo one or more TLS-lookalike frames; the padding is discarded."""
+        while len(self._raw) >= 5:
+            ctype = self._raw[0]
+            if ctype not in (0x16, 0x17) or self._raw[1] != 0x03:
+                raise ValueError("bad frame header")
+            outer = struct.unpack("!H", bytes(self._raw[3:5]))[0]
+            if outer < 2 or outer > MAX_RECORD + 2 + MAX_PAD:
+                raise ValueError("bad frame length: %d" % outer)
+            if len(self._raw) < 5 + outer:
+                return
+            body = bytes(self._raw[5:5 + outer])
+            del self._raw[:5 + outer]
+            inner = struct.unpack("!H", body[:2])[0]
+            if inner > MAX_RECORD or len(body) < 2 + inner:
+                raise ValueError("bad record inside frame")
+            cipher = body[2:2 + inner]
+            plain, self._dec_ctr = xor_keystream(self.dec_key, self._dec_ctr, cipher)
             self._inbuf.extend(plain)
 
     # ------------------------------------------------------------------
@@ -232,17 +293,11 @@ class RecordStream:
                 out += chunk
                 continue
             while not self._inbuf:
-                head = self._recv_blocking(2)
-                if len(head) < 2:
+                head = self._recv_blocking(self._needed_raw())
+                if not head:
                     return bytes(out)
-                length = struct.unpack("!H", head)[0]
-                if length > MAX_RECORD:
-                    raise ValueError("record too large: %d" % length)
-                body = self._recv_blocking(length)
-                if len(body) < length:
-                    return bytes(out)
-                plain, self._dec_ctr = xor_keystream(self.dec_key, self._dec_ctr, body)
-                self._inbuf.extend(plain)
+                self._raw.extend(head)
+                self._decode()
             take = min(n - len(out), len(self._inbuf))
             out += self._inbuf[:take]
             del self._inbuf[:take]
@@ -422,6 +477,39 @@ class Stats:
 
 
 STATS = Stats()
+RUNTIME: dict = {"server": None, "cfg": None}   # filled in by main(), read by the dashboard
+_public_ip_cache: str | None = None
+
+
+def detect_public_ip() -> str:
+    """Best-effort public address of this machine, for the import link.
+
+    A connected UDP socket never sends a packet; `getsockname()` merely tells
+    us which local address would be used, which on a VPS is its public IP.
+    Anything private or loopback is reported as "unknown" rather than baked
+    into a link that could never work.
+    """
+    global _public_ip_cache
+    if _public_ip_cache is not None:
+        return _public_ip_cache
+    ip = ""
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("1.1.1.1", 53))
+            ip = probe.getsockname()[0]
+        finally:
+            probe.close()
+    except OSError:
+        ip = ""
+    try:
+        parsed = ipaddress.ip_address(ip)
+        if parsed.is_private or parsed.is_loopback or parsed.is_link_local:
+            ip = ""
+    except ValueError:
+        ip = ""
+    _public_ip_cache = ip
+    return ip
 
 
 # --------------------------------------------------------------------------
@@ -461,9 +549,10 @@ class Config:
             "port": 1080,
             "dashboard_host": "0.0.0.0",
             "dashboard_port": 8080,
-            "obfs": "ahura/1",              # ahura/1 | none
+            "obfs": MODE_ANY,               # any | ahura/1 | tls | none
             "stealth_key": "",
             "tokens": [],                   # list of token strings ("user:token" keeps a label)
+            "public_host": "",              # printed in the import link; "" = autodetect
             "socks_user": "",
             "socks_pass": "",
             "max_connections": 2048,
@@ -555,10 +644,45 @@ class Session(threading.Thread):
         self.user = "anonymous"
         self.sid = -1
         self.closed = threading.Event()
+        self.framed = False            # client greeted us inside a TLS record
+        self.mode = MODE_AHURA         # framing mode chosen by the client
 
     # -- handshake -------------------------------------------------------
+    def _recv_n(self, n: int) -> bytes:
+        out = bytearray()
+        while len(out) < n:
+            chunk = self.sock.recv(n - len(out))
+            if not chunk:
+                break
+            out.extend(chunk)
+        return bytes(out)
+
     def _read_handshake_line(self) -> bytes:
-        buf = bytearray()
+        """Read the client's greeting.
+
+        Two shapes are accepted on the same port: the plain line
+        `AHURA/1 <nonce> <token> <mode>\\n`, and (stealth mode) the very same
+        line carried inside a TLS record whose first five bytes are a perfect
+        ClientHello header: `16 03 01 <len16>`.  `self.framed` remembers which
+        one we saw, because the reply must be framed the same way.
+        """
+        first = self._recv_n(1)
+        if not first:
+            return b""
+        if first[0] == 0x16:
+            head = first + self._recv_n(4)
+            if len(head) < 5:
+                return b""
+            outer = struct.unpack("!H", head[3:5])[0]
+            if outer < 1 or outer > 4096:
+                return b""
+            body = self._recv_n(outer)
+            if len(body) < outer:
+                return b""
+            self.framed = True
+            return body.split(b"\n", 1)[0][:HANDSHAKE_MAX]
+        self.framed = False
+        buf = bytearray(first)
         deadline = time.time() + 15
         while len(buf) < HANDSHAKE_MAX:
             if time.time() > deadline:
@@ -571,12 +695,40 @@ class Session(threading.Thread):
             buf.extend(ch)
         return bytes(buf)
 
+    def _reply_text(self, text: str) -> None:
+        """Send a prelude reply, framed to match how the client greeted us."""
+        payload = (text + "\n").encode("ascii", "replace")
+        if not self.framed:
+            self.sock.sendall(payload)
+            return
+        pad = os.urandom(random.randint(0, MAX_PAD))
+        body = payload + pad
+        self.sock.sendall(b"\x16\x03\x03" + struct.pack("!H", len(body)) + body)
+
     def _handshake(self) -> bool:
         line = self._read_handshake_line()
         parts = line.decode("ascii", "replace").strip().split(" ")
-        if len(parts) != 3 or parts[0] != PROTO_NAME:
+        if len(parts) == 3:
+            mode = MODE_AHURA                      # clients from v1.0.0
+        elif len(parts) == 4:
+            mode = parts[3]
+        else:
             self.stats.bump_error("bad-handshake")
-            self.sock.sendall(b"%s ERR bad-handshake\n" % PROTO_NAME.encode())
+            self._reply_text("%s ERR bad-handshake" % PROTO_NAME)
+            return False
+        if parts[0] != PROTO_NAME:
+            self.stats.bump_error("bad-handshake")
+            self._reply_text("%s ERR bad-handshake" % PROTO_NAME)
+            return False
+        if mode not in MODES_ENCRYPTED or (mode == MODE_TLS) != self.framed:
+            # Asking for a framing we are not actually speaking is the one
+            # thing that must never be papered over: the streams would drift.
+            self.stats.bump_error("bad-mode")
+            self._reply_text("%s ERR bad-mode" % PROTO_NAME)
+            return False
+        if not self.server.allows_mode(mode):
+            self.stats.bump_error("mode-not-allowed")
+            self._reply_text("%s ERR mode-not-allowed" % PROTO_NAME)
             return False
         try:
             nonce = bytes.fromhex(parts[1])
@@ -584,14 +736,14 @@ class Session(threading.Thread):
             nonce = b""
         if len(nonce) != 16:
             self.stats.bump_error("bad-nonce")
-            self.sock.sendall(b"%s ERR bad-nonce\n" % PROTO_NAME.encode())
+            self._reply_text("%s ERR bad-nonce" % PROTO_NAME)
             return False
         token = parts[2]
         if not self.server.check_token(token):
             self.stats.bump_error("bad-token")
             log("rejected %s: bad token" % self.peer, "warn")
             time.sleep(0.3)
-            self.sock.sendall(b"%s ERR unauthorized\n" % PROTO_NAME.encode())
+            self._reply_text("%s ERR unauthorized" % PROTO_NAME)
             return False
         self.user = self.server.token_label(token)
         key_c2s, key_s2c = derive_keys(self.server.stealth_key, nonce)
@@ -599,8 +751,9 @@ class Session(threading.Thread):
         # point of the protocol, carries no secret, and lets a client tell
         # "wrong token / wrong key" apart from "server is speaking something
         # else entirely".  Everything after this byte leaves encrypted.
-        self.sock.sendall(b"%s OK\n" % PROTO_NAME.encode())
-        self.stream = RecordStream(self.sock, key_s2c, key_c2s)
+        self._reply_text("%s OK %s" % (PROTO_NAME, mode))
+        self.stream = RecordStream(self.sock, key_s2c, key_c2s, mode)
+        self.mode = mode
         return True
 
     # -- lifecycle -------------------------------------------------------
@@ -621,11 +774,11 @@ class Session(threading.Thread):
             # The handshake/prelude runs on a blocking socket with a deadline;
             # the data pump that follows is fully non-blocking.
             self.sock.settimeout(self.server.cfg.connect_timeout + 10)
-            if self.server.cfg.obfs == "ahura/1":
+            if self.server.cfg.obfs == MODE_NONE:
+                self.stream = RecordStream(self.sock, None, None, MODE_NONE)
+            else:
                 if not self._handshake():
                     return
-            else:
-                self.stream = RecordStream(self.sock, None, None)
             self.sid = self.stats.open_session(self.peer, self.user, "tcp")
             self._serve()
         except (ConnectionResetError, BrokenPipeError, TimeoutError, socket.timeout):
@@ -1002,11 +1155,29 @@ class RelayServer:
         self._per_ip: Counter = Counter()
         self._lock = threading.Lock()
         key = cfg.stealth_key.strip()
-        if cfg.obfs == "ahura/1" and not key:
+        if cfg.obfs != MODE_NONE and not key:
             key = secrets.token_hex(16)
             log("no stealth_key configured — generated one for this run: %s" % key, "warn")
         self.stealth_key = bytes.fromhex(key) if len(key) == 32 and all(c in "0123456789abcdefABCDEF" for c in key) else key.encode()
         self.tokens = self._parse_tokens(cfg.tokens)
+
+    def allows_mode(self, mode: str) -> bool:
+        want = self.cfg.obfs
+        return want == MODE_ANY or want == mode
+
+    def first_token(self) -> str:
+        for tok in self.tokens:
+            return tok
+        return "-"
+
+    def import_uri(self, host: str | None = None) -> str:
+        """`ahura://` link the Android app can import in one tap."""
+        host = host or self.cfg.public_host or detect_public_ip()
+        if not host:
+            return ""
+        return "ahura://relay@%s:%d?key=%s&token=%s&obfs=%s&name=relay" % (
+            host, self.cfg.port, self.stealth_key.decode("utf-8", "replace"),
+            self.first_token(), self.cfg.obfs if self.cfg.obfs != MODE_ANY else MODE_TLS)
 
     @staticmethod
     def _parse_tokens(raw) -> dict:
@@ -1141,6 +1312,13 @@ DASHBOARD_HTML = r"""<!doctype html>
   <div class="card"><div class="k">پروفایل‌های کاربری</div><div id="users" class="scroll"></div></div>
 </div>
 
+<div class="card" style="margin-top:14px">
+  <div class="k">لینک اتصال اپ اندروید (کپی کنید و در اپ وارد کنید)</div>
+  <div class="sub" id="uri" style="margin:6px 0 10px">—</div>
+  <div class="k">حالت پنهان‌سازی این پورت</div>
+  <div class="pill" id="obfs">—</div>
+</div>
+
 <div class="row">
   <div class="card"><div class="k">نشست‌های فعال</div><div id="sessions" class="scroll"></div></div>
   <div class="card"><div class="k">مقصدهای پرترافیک</div><div id="targets" class="scroll"></div>
@@ -1179,7 +1357,10 @@ async function tick(){
     document.getElementById('down').innerHTML=fmt(d.down_bytes);
     document.getElementById('act').textContent=d.active_sessions;
     document.getElementById('tot').innerHTML=d.total_sessions+' <small>· '+Math.round(d.uptime_s)+'s</small>';
-    document.getElementById('ep').textContent=location.hostname+':1080';
+    document.getElementById('ep').textContent=location.hostname+':'+(d.port||1080);
+    document.getElementById('obfs').textContent=d.obfs||'—';
+    document.getElementById('uri').innerHTML = d.import_uri ?
+      '<code id="uricode">'+esc(d.import_uri)+'</code>' : '— (public_host را در کانفیگ تنظیم کنید)';
     const last=d.history[d.history.length-1]||{up:0,down:0};
     document.getElementById('rate').textContent='آپلود '+fmt(last.up)+'/s — دانلود '+fmt(last.down)+'/s';
     hist=d.history.slice(-120); draw();
@@ -1212,7 +1393,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             body = DASHBOARD_HTML.encode("utf-8")
             self._send(200, "text/html; charset=utf-8", body)
         elif path in ("/api/stats", "/stats", "/api/stats/"):
-            body = json.dumps(STATS.snapshot(), ensure_ascii=False).encode("utf-8")
+            snapshot = STATS.snapshot()
+            srv = RUNTIME.get("server")
+            if srv is not None:
+                snapshot["obfs"] = srv.cfg.obfs
+                snapshot["port"] = srv.cfg.port
+                snapshot["stealth_key"] = srv.stealth_key.decode("utf-8", "replace")
+                snapshot["import_uri"] = srv.import_uri()
+            body = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
             self._send(200, "application/json; charset=utf-8", body)
         elif path == "/healthz":
             self._send(200, "text/plain; charset=utf-8", b"ok\n")
@@ -1264,8 +1452,10 @@ def parse_args(argv: list[str]) -> Config:
     p.add_argument("-p", "--port", type=int, help="listen port (default 1080)")
     p.add_argument("--dashboard-host")
     p.add_argument("--dashboard-port", type=int)
-    p.add_argument("--obfs", choices=["ahura/1", "none"], help="obfuscation mode")
+    p.add_argument("--obfs", choices=[MODE_ANY, MODE_AHURA, MODE_TLS, MODE_NONE],
+                   help="framing accepted on the port: any (default) | ahura/1 | tls | none")
     p.add_argument("--stealth-key", help="shared secret for AHURA/1 (hex or text)")
+    p.add_argument("--public-host", help="host/IP printed in the ahura:// import link")
     p.add_argument("--token", action="append", default=[], metavar="[LABEL:]TOKEN",
                    help="stealth token allowed to connect (repeatable)")
     p.add_argument("--socks-user")
@@ -1309,8 +1499,17 @@ def main(argv: list[str] | None = None) -> int:
     _log_level = LOG_LEVELS.get(cfg.log_level, LOG_LEVELS["info"])
 
     server = RelayServer(cfg)
+    RUNTIME["server"] = server
+    RUNTIME["cfg"] = cfg
+    detect_public_ip()
     start_dashboard(cfg)
     start_sampler()
+    log("framing modes accepted: %s" % cfg.obfs)
+    uri = server.import_uri()
+    if uri:
+        log("import link for the Android app:\n    %s" % uri)
+    else:
+        log("set --public-host to print a ready-to-import ahura:// link", "warn")
 
     def bye(signum, _frame):        # noqa: ANN001
         log("signal %s received — shutting down" % signum, "warn")

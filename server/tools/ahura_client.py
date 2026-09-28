@@ -22,13 +22,36 @@ import hashlib
 import hmac
 import ipaddress
 import os
+import random
 import select
 import socket
 import struct
 import sys
 
 MAX_RECORD = 8192
+MAX_PAD = 64
 PROTO = "AHURA/1"
+MODE_AHURA = "ahura/1"
+MODE_TLS = "tls"
+MODE_NONE = "none"
+
+
+def frame_tls(record: bytes, content_type: int = 0x17, minor: int = 0x03) -> bytes:
+    """Wrap a record so it looks like one TLS record.
+
+    The random padding goes *after* the length-prefixed record, so the frame's
+    outer length varies on every packet while the receiver can still tell where
+    the real data ends.  (Random padding before the record would be ambiguous;
+    padding after it is free, and DPI sees a stream of well-formed TLS records
+    with unpredictable sizes.)
+
+    `content_type` is 0x16 for the greeting (so a censor sees a ClientHello:
+    `16 03 01 …`) and 0x17 for payload, which is what real TLS traffic looks
+    like in both phases.
+    """
+    pad = os.urandom(random.randint(0, MAX_PAD))
+    body = record + pad
+    return bytes([content_type, 0x03, minor]) + struct.pack("!H", len(body)) + body
 
 
 # --------------------------------------------------------------------------
@@ -59,9 +82,11 @@ def xor_keystream(key: bytes, counter: int, data: bytes) -> tuple[bytes, int]:
 class AhuraStream:
     """Framed, optionally encrypted byte stream (client side)."""
 
-    def __init__(self, sock: socket.socket, key_c2s: bytes | None, key_s2c: bytes | None):
+    def __init__(self, sock: socket.socket, key_c2s: bytes | None, key_s2c: bytes | None,
+                 mode: str = MODE_AHURA):
         self.sock = sock
         self.key_c2s, self.key_s2c = key_c2s, key_s2c
+        self.mode = mode
         self._enc = self._dec = 0
         self._buf = bytearray()
         self._raw = bytearray()
@@ -76,6 +101,18 @@ class AhuraStream:
             raise TimeoutError("timed out waiting for the relay")
         if self.key_s2c is None:
             chunk = self.sock.recv(65536)
+        elif self.mode == MODE_TLS:
+            head = self._recv_all(5)
+            if len(head) < 5 or head[0] not in (0x16, 0x17) or head[1] != 0x03:
+                return False
+            outer = struct.unpack("!H", head[3:5])[0]
+            body = self._recv_all(outer)
+            if len(body) < outer:
+                return False
+            ln = struct.unpack("!H", body[:2])[0]
+            if ln > MAX_RECORD or len(body) < 2 + ln:
+                raise AhuraError("AHURA/1: bad record inside TLS frame")
+            chunk, self._dec = xor_keystream(self.key_s2c, self._dec, body[2:2 + ln])
         else:
             head = self._recv_all(2)
             if len(head) < 2:
@@ -151,7 +188,8 @@ class AhuraStream:
             chunk = data[off:off + MAX_RECORD]
             off += len(chunk)
             ct, self._enc = xor_keystream(self.key_c2s, self._enc, chunk)
-            self.sock.sendall(struct.pack("!H", len(ct)) + ct)
+            record = struct.pack("!H", len(ct)) + ct
+            self.sock.sendall(frame_tls(record, 0x17) if self.mode == MODE_TLS else record)
 
 
 # --------------------------------------------------------------------------
@@ -212,31 +250,54 @@ class AhuraClient:
         # Plain blocking socket afterwards: per-call deadlines are implemented
         # with select() so a read deadline can never abort a concurrent send().
         self.sock.settimeout(None)
-        if self.obfs == "ahura/1":
-            if not self.stealth_key:
-                raise AhuraError("stealth key required for obfs=ahura/1")
-            nonce = os.urandom(16)
-            key = (bytes.fromhex(self.stealth_key) if len(self.stealth_key) == 32
-                   and all(c in "0123456789abcdefABCDEF" for c in self.stealth_key)
-                   else self.stealth_key.encode())
-            key_c2s, key_s2c = derive_keys(key, nonce)
-            line = "%s %s %s\n" % (PROTO, nonce.hex(), self.token or "-")
-            self.sock.sendall(line.encode())
-            first = bytearray()
-            while len(first) < 64:
-                ch = self.sock.recv(1)
-                if not ch:
-                    break
-                if ch == b"\n":
-                    break
-                first.extend(ch)
-            reply = first.decode("ascii", "replace")
-            if not reply.startswith(PROTO + " OK"):
-                raise AhuraError("relay refused handshake: %s" % reply.strip())
-            self.stream = AhuraStream(self.sock, key_c2s, key_s2c)
+        if self.obfs == MODE_NONE:
+            self.stream = AhuraStream(self.sock, None, None, MODE_NONE)
+            return self
+        if not self.stealth_key:
+            raise AhuraError("stealth key required for obfs=%s" % self.obfs)
+        nonce = os.urandom(16)
+        key = (bytes.fromhex(self.stealth_key) if len(self.stealth_key) == 32
+               and all(c in "0123456789abcdefABCDEF" for c in self.stealth_key)
+               else self.stealth_key.encode())
+        key_c2s, key_s2c = derive_keys(key, nonce)
+        line = ("%s %s %s %s\n" % (PROTO, nonce.hex(), self.token or "-", self.obfs)).encode()
+        if self.obfs == MODE_TLS:
+            # First bytes on the wire are a textbook ClientHello header.
+            self.sock.sendall(frame_tls(line, 0x16, 0x01))
+            reply = self._read_tls_line()
         else:
-            self.stream = AhuraStream(self.sock, None, None)
+            self.sock.sendall(line)
+            reply = self._read_plain_line()
+        if not reply.startswith(PROTO + " OK"):
+            raise AhuraError("relay refused handshake: %s" % reply.strip())
+        self.stream = AhuraStream(self.sock, key_c2s, key_s2c, self.obfs)
         return self
+
+    def _recv_n(self, n: int) -> bytes:
+        out = bytearray()
+        while len(out) < n:
+            chunk = self.sock.recv(n - len(out))
+            if not chunk:
+                break
+            out.extend(chunk)
+        return bytes(out)
+
+    def _read_plain_line(self) -> str:
+        first = bytearray()
+        while len(first) < 160:
+            ch = self.sock.recv(1)
+            if not ch or ch == b"\n":
+                break
+            first.extend(ch)
+        return first.decode("ascii", "replace")
+
+    def _read_tls_line(self) -> str:
+        head = self._recv_n(5)
+        if len(head) < 5:
+            return ""
+        outer = struct.unpack("!H", head[3:5])[0]
+        body = self._recv_n(outer)
+        return body.split(b"\n", 1)[0].decode("ascii", "replace")
 
     # -- socks5 ----------------------------------------------------------
     def socks_handshake(self) -> None:
@@ -301,7 +362,8 @@ def main(argv=None) -> int:
     p.add_argument("--port", type=int, default=1080)
     p.add_argument("--token", default="")
     p.add_argument("--key", default=os.environ.get("AHURA_STEALTH_KEY", ""))
-    p.add_argument("--obfs", choices=["ahura/1", "none"], default="ahura/1")
+    p.add_argument("--obfs", choices=[MODE_TLS, MODE_AHURA, MODE_NONE], default=MODE_AHURA,
+                   help="tls = TLS-lookalike framing (recommended), ahura/1 = compact framing")
     p.add_argument("--user", default="")
     p.add_argument("--password", default="")
     p.add_argument("--target", required=True, help="ip:port")
