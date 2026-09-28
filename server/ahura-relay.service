@@ -1,0 +1,31 @@
+[Unit]
+Description=Ahura Relay (SOCKS5 + AHURA/1 stealth + dashboard)
+Documentation=file:///opt/ahura-mazda-vpn/docs/PROTOCOL.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nobody
+WorkingDirectory=/opt/ahura-mazda-vpn
+# Set AHURA_STEALTH_KEY in the drop-in (`systemctl edit ahura-relay`) instead
+# of hard-coding it here:
+#   [Service]
+#   Environment=AHURA_STEALTH_KEY=00112233445566778899aabbccddeeff
+Environment=AHURA_STEALTH_KEY=change-me
+ExecStart=/usr/bin/python3 /opt/ahura-mazda-vpn/server/ahura_relay.py \
+    --config /opt/ahura-mazda-vpn/server/relay.json \
+    --host 0.0.0.0 --port 1080 \
+    --dashboard-host 0.0.0.0 --dashboard-port 8080 \
+    --log-level info
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/ahura-mazda-vpn
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

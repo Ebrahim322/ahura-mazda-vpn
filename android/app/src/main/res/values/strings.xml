@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Default locale: Persian (the app's first audience).  values-en/ holds an
+     English set; anything missing there falls back to these strings. -->
+<resources>
+    <string name="app_name">آهورا مزدا VPN</string>
+    <string name="channel_name">وضعیت تانل</string>
+    <string name="channel_description">اعلان دائمی وضعیت اتصال و ترافیک</string>
+    <string name="notification_title">آهورا مزدا VPN</string>
+    <string name="notification_connected">متصل — ↑ %1$s / ↓ %2$s</string>
+    <string name="notification_starting">در حال اتصال…</string>
+    <string name="connect">اتصال</string>
+    <string name="disconnect">قطع اتصال</string>
+
+    <string name="status_connected">متصل و فعال</string>
+    <string name="status_disconnected">قطع</string>
+    <string name="detail_connected">همه ترافیک بر اساس قواعد آی‌پی از رله عبور می‌کند</string>
+    <string name="detail_idle">برای شروع، سرور رله را تنظیم و اتصال را بزنید</string>
+    <string name="active_server">رله فعال: %1$s</string>
+
+    <string name="stat_upload">آپلود: %1$s</string>
+    <string name="stat_download">دانلود: %1$s</string>
+    <string name="stat_flows">TCP فعال: %1$d — UDP فعال: %2$d
+مجموع اتصال‌ها: %3$d TCP / %4$d UDP</string>
+    <string name="stat_uptime">مدت اتصال: %1$s — خطاها: %2$d</string>
+
+    <string name="need_server">اول یک سرور رله اضافه کنید</string>
+    <string name="permission_denied">اجازه ساخت VPN داده نشد</string>
+    <string name="checking">در حال بررسی…</string>
+    <string name="check_ok">موفق — دست‌دادن در %1$d میلی‌ثانیه (حالت %2$s)</string>
+    <string name="check_failed">ناموفق — %1$s</string>
+    <string name="health_check">تست سلامت رله</string>
+
+    <string name="select_server">یک سرور را انتخاب کنید</string>
+    <string name="delete_server">این سرور حذف شود؟</string>
+    <string name="copied_link">لینک سرور کپی شد</string>
+    <string name="copied_settings">تنظیمات کپی شد</string>
+    <string name="copied_log">گزارش کپی شد</string>
+    <string name="import_failed">چیزی برای درون‌ریزی پیدا نشد</string>
+    <string name="import_done">سرور «%1$s» اضافه شد</string>
+    <string name="import_done_settings">تنظیمات درون‌ریزی شد</string>
+    <string name="import_done_servers">سرورهای اضافه‌شده: %1$s</string>
+    <string name="add_server">افزودن سرور</string>
+    <string name="edit_server">ویرایش سرور</string>
+    <string name="default_profile_name">رله من</string>
+    <string name="save">ذخیره</string>
+    <string name="saved">ذخیره شد</string>
+    <string name="cancel">انصراف</string>
+    <string name="host_required">نشانی سرور لازم است</string>
+    <string name="server_saved">سرور ذخیره شد</string>
+    <string name="yes">بله</string>
+    <string name="no">خیر</string>
+    <string name="clear">پاک کردن</string>
+    <string name="generate_key">ساخت کلید تصادفی</string>
+
+    <string name="pick_apps">انتخاب برنامه‌ها</string>
+    <string name="app_summary">حالت برنامه‌ها: %1$s — %2$d برنامه انتخاب شده</string>
+    <string name="app_mode_all">همه برنامه‌ها</string>
+    <string name="app_mode_only">فقط برنامه‌های انتخابی</string>
+    <string name="app_mode_exclude">همه به‌جز برنامه‌های انتخابی</string>
+
+    <string name="rule_test_bad">آدرس معتبر نیست</string>
+    <string name="rule_test_result">تصمیم برای این آدرس: %1$s
+%2$s</string>
+    <string name="route_summary">%1$d مسیر در تانل ساخته می‌شود: %2$s</string>
+    <string name="version_line">%1$s — نسخه %2$s</string>
+
+    <string name="tab_home">اتصال</string>
+    <string name="tab_servers">سرورها</string>
+    <string name="tab_rules">قواعد آی‌پی</string>
+    <string name="tab_settings">تنظیمات</string>
+    <string name="tab_log">گزارش</string>
+
+    <string name="section_traffic">ترافیک</string>
+    <string name="section_recent">آخرین رویدادها</string>
+    <string name="section_servers">سرورهای رله (SOCKS5 + AHURA/1)</string>
+    <string name="section_mode">حالت مسیریابی</string>
+    <string name="section_rules">فهرست قواعد (هر خط یک CIDR)</string>
+    <string name="section_apps">برنامه‌ها</string>
+    <string name="section_test">آزمایش تصمیم مسیریابی</string>
+    <string name="section_dns">دی‌ان‌اس داخل تانل</string>
+    <string name="section_advanced">پیشرفته</string>
+    <string name="section_about">درباره</string>
+
+    <string name="test_servers">تست همه سرورها</string>
+    <string name="testing_servers">در حال تست %1$d سرور…</string>
+    <string name="auto_select">انتخاب خودکار سریع‌ترین سرور</string>
+    <string name="latency_ms">%1$d میلی‌ثانیه</string>
+    <string name="latency_unknown">تست‌نشده</string>
+    <string name="latency_testing">در حال تست…</string>
+    <string name="best_server">سریع‌ترین سرور: %1$s (%2$d میلی‌ثانیه)</string>
+    <string name="no_server_answered">هیچ سروری پاسخ نداد</string>
+    <string name="install_server">دستور نصب سرور</string>
+    <string name="install_hint">نصب سرور رله روی VPS با یک خط (systemd + کلید + فایروال):</string>
+    <string name="install_command">curl -fsSL https://raw.githubusercontent.com/Ebrahim322/ahura-mazda-vpn/main/server/install.sh | sudo bash</string>
+    <string name="copied_install">دستور نصب کپی شد — روی VPS اجرا کنید</string>
+    <string name="link_added">سرور «%1$s» از لینک اضافه شد</string>
+    <string name="obfs_hint">حالت پنهان‌سازی (tls = ترافیک شبیه TLS واقعی)</string>
+    <string name="hint_host">آی‌پی یا نام سرور رله</string>
+    <string name="hint_port">پورت</string>
+    <string name="hint_key">کلید مخفی (hex ۳۲ کاراکتری یا متن)</string>
+    <string name="hint_token">توکن دستگاه</string>
+    <string name="hint_user">نام کاربری SOCKS5 (اختیاری)</string>
+    <string name="hint_pass">گذرواژه SOCKS5 (اختیاری)</string>
+    <string name="hint_rules">۱.۱.۱.۰/۲۴
+!۱۹۲.۱۶۸.۰.۰/۱۶
+block ۵.۵.۵.۵
+# خطوط با # نادیده گرفته می‌شوند</string>
+    <string name="hint_ip_test">مثلاً ۸.۸.۸.۸</string>
+    <string name="hint_dns1">دی‌ان‌اس اول</string>
+    <string name="hint_dns2">دی‌ان‌اس دوم</string>
+    <string name="hint_mtu">MTU (۵۷۶ تا ۱۵۰۰)</string>
+
+    <string name="label_mode_all">همه ترافیک (تانل کامل)</string>
+    <string name="label_mode_list">فقط فهرست آی‌پی‌های زیر</string>
+    <string name="label_bypass_local">شبکه محلی و آدرس‌های خصوصی از تانل خارج شوند</string>
+    <string name="label_ipv6">پشتیبانی IPv6</string>
+    <string name="label_udp">عبور UDP (دی‌ان‌اس، بازی، QUIC)</string>
+    <string name="label_auto_start">اتصال خودکار پس از روشن شدن دستگاه</string>
+    <string name="label_debug">ثبت گزارش کامل (debug)</string>
+
+    <string name="add">افزودن</string>
+    <string name="edit">ویرایش</string>
+    <string name="delete">حذف</string>
+    <string name="share_link">کپی لینک</string>
+    <string name="import_clipboard">درون‌ریزی</string>
+    <string name="pick_apps_button">انتخاب برنامه‌ها</string>
+    <string name="save_rules">ذخیره قواعد</string>
+    <string name="export_settings">برون‌ریزی تنظیمات</string>
+    <string name="import_settings">درون‌ریزی تنظیمات</string>
+    <string name="clear_log">پاک کردن گزارش</string>
+    <string name="copy_log">کپی گزارش</string>
+    <string name="about_text">تانل آی‌پی‌محور روی SOCKS5 با لایه پنهان‌سازی AHURA/1. تصمیم مسیریابی فقط بر پایه آی‌پی مقصد گرفته می‌شود و هیچ نامی روی دستگاه ترجمه نمی‌شود، بنابراین مسموم‌کردن دی‌ان‌اس یا فیلتر دامنه نمی‌تواند تانل را از کار بیندازد.\n\nسرور رله در پوشه server/ همین مخزن قرار دارد (پایتون، بدون وابستگی).</string>
+</resources>

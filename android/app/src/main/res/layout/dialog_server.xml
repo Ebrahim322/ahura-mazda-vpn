@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <EditText
+            android:id="@+id/dlgName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="نام سرور"
+            android:inputType="text"
+            android:textColor="@color/ahura_text" />
+
+        <EditText
+            android:id="@+id/dlgHost"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_host"
+            android:inputType="textUri"
+            android:textColor="@color/ahura_text"
+            android:textDirection="ltr" />
+
+        <EditText
+            android:id="@+id/dlgPort"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_port"
+            android:inputType="number"
+            android:textColor="@color/ahura_text"
+            android:textDirection="ltr" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/dlgKey"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="@string/hint_key"
+                android:inputType="text"
+                android:textColor="@color/ahura_text"
+                android:textDirection="ltr" />
+
+            <Button
+                android:id="@+id/dlgGenerateKey"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/generate_key" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/dlgToken"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_token"
+            android:inputType="text"
+            android:textColor="@color/ahura_text"
+            android:textDirection="ltr" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/obfs_hint"
+            android:textColor="@color/ahura_muted"
+            android:textSize="12sp" />
+
+        <Spinner
+            android:id="@+id/dlgObfs"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <EditText
+            android:id="@+id/dlgUser"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_user"
+            android:inputType="text"
+            android:textColor="@color/ahura_text"
+            android:textDirection="ltr" />
+
+        <EditText
+            android:id="@+id/dlgPass"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_pass"
+            android:inputType="textPassword"
+            android:textColor="@color/ahura_text"
+            android:textDirection="ltr" />
+    </LinearLayout>
+</ScrollView>

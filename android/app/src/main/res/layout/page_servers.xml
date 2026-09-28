@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        style="@style/AhuraSection"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/section_servers" />
+
+    <CheckBox
+        android:id="@+id/autoSelectBox"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/auto_select"
+        android:textColor="@color/ahura_text" />
+
+    <ListView
+        android:id="@+id/serverList"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@drawable/card_bg"
+        android:padding="6dp" />
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/addServerButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/add" />
+
+            <Button
+                android:id="@+id/editServerButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/edit" />
+
+            <Button
+                android:id="@+id/deleteServerButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/delete" />
+
+            <Button
+                android:id="@+id/shareServerButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/share_link" />
+
+            <Button
+                android:id="@+id/importServerButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/import_clipboard" />
+
+            <Button
+                android:id="@+id/testServersButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/test_servers" />
+
+            <Button
+                android:id="@+id/installServerButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/install_server" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <TextView
+        style="@style/AhuraMuted"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/install_hint" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="4dp"
+        android:text="@string/install_command"
+        android:textColor="@color/ahura_muted"
+        android:textDirection="ltr"
+        android:textSize="11sp"
+        android:typeface="monospace" />
+</LinearLayout>

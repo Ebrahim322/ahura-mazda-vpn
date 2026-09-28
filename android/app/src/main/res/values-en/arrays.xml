@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English overrides for the label arrays; the Persian default is in values/. -->
+<resources>
+    <string-array name="obfs_modes">
+        <item>TLS-lookalike — recommended (traffic looks like real TLS)</item>
+        <item>Compact AHURA/1 (no TLS mimicry)</item>
+        <item>Raw SOCKS5 (no obfuscation)</item>
+    </string-array>
+    <string-array name="app_modes">
+        <item>All apps</item>
+        <item>Only selected apps</item>
+        <item>All but selected apps</item>
+    </string-array>
+</resources>

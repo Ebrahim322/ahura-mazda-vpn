@@ -1,0 +1,110 @@
+# Builds an installable APK in the cloud, so the app can be produced without
+# any local Android toolchain: push (or run the workflow by hand) and download
+# the artifact — or tag a release and grab the APK from the Releases page.
+name: Build APK
+
+on:
+  push:
+    branches: ["main", "arena/**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    name: assemble APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Generate the Gradle wrapper (for local builds)
+        working-directory: android
+        run: gradle --no-daemon wrapper --gradle-version 8.9
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          set -o pipefail
+          gradle --no-daemon assembleDebug 2>&1 | tee /tmp/build.log
+
+      # The build log is the only way to debug a failure from a sandbox that
+      # cannot reach the runner's blob storage, so on failure the interesting
+      # part is posted back as a commit comment.  (Only when the build fails.)
+      - name: Report build failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+
+          log = ""
+          try:
+              log = open("/tmp/build.log", encoding="utf-8", errors="replace").read()
+          except OSError:
+              pass
+          lines = log.splitlines()
+          keep = [l for l in lines if re.search(r"error:|e: |FAILURE|What went wrong|Could not|Caused by|warning: |Execution failed|> Task .*FAILED", l)]
+          tail = lines[-80:]
+          body = "### Build failed\n\n```\n" + "\n".join((keep[:120] + ["..."] + tail)[-260:])[:6000] + "\n```\n"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          sha = os.environ["GITHUB_SHA"]
+          req = urllib.request.Request(
+              "https://api.github.com/repos/%s/commits/%s/comments" % (repo, sha),
+              data=json.dumps({"body": body}).encode(),
+              headers={
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "Accept": "application/vnd.github+json",
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(req) as r:
+                  print("comment posted:", r.status)
+          except Exception as exc:  # never mask the real failure
+              print("could not post comment:", exc)
+          PY
+
+      - name: Show what came out
+        working-directory: android
+        run: ls -lh app/build/outputs/apk/debug/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ahura-mazda-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Attach the APK to a GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/debug/*.apk
+          generate_release_notes: true
+          body: |
+            ## نصب / Install
+
+            فایل `app-debug.apk` را دانلود و روی گوشی اندروید نصب کنید
+            (اجازهٔ «نصب از منابع ناشناس» لازم است).
+
+            1. سرور رله را با یک دستور نصب کنید (روی VPS):
+               `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/server/install.sh | sudo bash`
+            2. لینک `ahura://…` چاپ‌شده را در پیام‌رسان برای خودتان بفرستید و
+               در اپ با دکمهٔ «افزودن از کلیپ‌بورد» وارد کنید.
+            3. دکمهٔ اتصال را بزنید.

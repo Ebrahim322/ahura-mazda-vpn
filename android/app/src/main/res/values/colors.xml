@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ahura_bg">#0B1020</color>
+    <color name="ahura_surface">#141B31</color>
+    <color name="ahura_surface_alt">#1B2440</color>
+    <color name="ahura_stroke">#26314F</color>
+    <color name="ahura_text">#E8ECF8</color>
+    <color name="ahura_muted">#8B98B8</color>
+    <color name="ahura_accent">#7C8CFF</color>
+    <color name="ahura_ok">#31D0AA</color>
+    <color name="ahura_warn">#FFB454</color>
+    <color name="ahura_err">#FF6B81</color>
+    <color name="ic_launcher_background">#0B1020</color>
+</resources>

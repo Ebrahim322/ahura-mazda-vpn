@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.jks
+*.keystore
+
+# editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# relay runtime leftovers
+relay.json
+*.log

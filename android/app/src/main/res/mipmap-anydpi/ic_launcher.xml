@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy icon (API 21..25): full-bleed vector, no PNG assets needed. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#0B1020"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+    <path
+        android:fillColor="#7C8CFF"
+        android:pathData="M54,24 L82,35 L82,58 C82,73 70,83.5 54,89 C38,83.5 26,73 26,58 L26,35 Z" />
+    <path
+        android:fillColor="#31D0AA"
+        android:pathData="M54,41 C60.5,49.5 68,54.5 68,62.5 C68,70.8 61.7,77 54,77 C46.3,77 40,70.8 40,62.5 C40,54.5 47.5,49.5 54,41 Z" />
+    <path
+        android:fillColor="#0B1020"
+        android:pathData="M54,53 C57.4,57.6 61.5,60.4 61.5,64.6 C61.5,68.9 58.1,72 54,72 C49.9,72 46.5,68.9 46.5,64.6 C46.5,60.4 50.6,57.6 54,53 Z" />
+</vector>

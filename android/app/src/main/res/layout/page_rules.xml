@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            style="@style/AhuraSection"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/section_mode" />
+
+        <RadioGroup
+            android:id="@+id/modeGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            style="@style/AhuraCard">
+
+            <RadioButton
+                android:id="@+id/modeAll"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/label_mode_all" />
+
+            <RadioButton
+                android:id="@+id/modeList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/label_mode_list" />
+
+            <CheckBox
+                android:id="@+id/bypassLocal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/label_bypass_local" />
+
+            <CheckBox
+                android:id="@+id/useV6"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/label_ipv6" />
+
+            <CheckBox
+                android:id="@+id/useUdp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/label_udp" />
+        </RadioGroup>
+
+        <TextView
+            style="@style/AhuraSection"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/section_rules" />
+
+        <EditText
+            android:id="@+id/rulesEdit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_bg"
+            android:gravity="start"
+            android:hint="@string/hint_rules"
+            android:inputType="textMultiLine"
+            android:minLines="5"
+            android:padding="10dp"
+            android:typeface="monospace"
+            android:textColor="@color/ahura_text"
+            android:textSize="13sp"
+            android:textDirection="ltr" />
+
+        <TextView
+            android:id="@+id/routeSummary"
+            style="@style/AhuraMuted"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <Button
+            android:id="@+id/saveRulesButton"
+            style="@style/AhuraButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/save_rules" />
+
+        <TextView
+            style="@style/AhuraSection"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/section_apps" />
+
+        <Spinner
+            android:id="@+id/appMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/pickAppsButton"
+                style="@style/AhuraButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/pick_apps_button" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/appSummary"
+            style="@style/AhuraMuted"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            style="@style/AhuraSection"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/section_test" />
+
+        <EditText
+            android:id="@+id/ruleTestInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_ip_test"
+            android:inputType="text"
+            android:textColor="@color/ahura_text"
+            android:textDirection="ltr" />
+
+        <TextView
+            android:id="@+id/ruleTestResult"
+            style="@style/AhuraLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textDirection="ltr" />
+    </LinearLayout>
+</ScrollView>
