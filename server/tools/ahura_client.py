@@ -305,7 +305,8 @@ def main(argv=None) -> int:
     p.add_argument("--user", default="")
     p.add_argument("--password", default="")
     p.add_argument("--target", required=True, help="ip:port")
-    p.add_argument("--probe", action="store_true", help="speak plain HTTP HEAD on the target")
+    p.add_argument("--probe", action="store_true", help="speak plain HTTP on the target")
+    p.add_argument("--host-header", default="", help="Host header for --probe (defaults to the target IP)")
     args = p.parse_args(argv)
 
     ip, port = args.target.rsplit(":", 1)
@@ -314,12 +315,19 @@ def main(argv=None) -> int:
     try:
         c.open()
         print("handshake: ok (%s)" % args.obfs)
-        c.socks_handshake()
+        # NOTE: connect_ip() performs the SOCKS5 greeting itself — calling
+        # socks_handshake() here as well sends the greeting twice and the
+        # session stalls half-way (this bug lived here once; fixed 2026).
         bound = c.connect_ip(ip, int(port))
         print("connected to %s:%s via %s:%d" % (ip, port, bound[0], bound[1]))
         if args.probe:
-            c.stream.send(("HEAD / HTTP/1.0\r\nHost: %s\r\n\r\n" % ip).encode())
-            print(c.stream.recv_exact(1024).decode("latin-1", "replace").split("\r\n")[0])
+            host_header = args.host_header or ip
+            c.stream.send(("GET / HTTP/1.0\r\nHost: %s\r\nUser-Agent: ahura-client/1.0\r\n"
+                           "Connection: close\r\n\r\n" % host_header).encode())
+            # recv_some, not read_exact: a small HTTP reply must not make us
+            # wait for a full 1 KiB.
+            reply = c.stream.recv_some(2048, timeout=8)
+            print("reply: %d bytes  %s" % (len(reply), reply.decode("latin-1", "replace").split("\r\n")[0]))
         return 0
     except AhuraError as exc:
         print("FAILED: %s" % exc, file=sys.stderr)
