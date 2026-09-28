@@ -1,0 +1,26 @@
+{
+  "host": "0.0.0.0",
+  "port": 1080,
+  "dashboard_host": "0.0.0.0",
+  "dashboard_port": 8080,
+
+  "obfs": "ahura/1",
+  "stealth_key": "put-a-32-hex-character-key-here",
+
+  "tokens": ["phone-1", "laptop:laptop-token", "friend:friend-token"],
+
+  "socks_user": "",
+  "socks_pass": "",
+
+  "allow_private": false,
+  "allow_cidr": [],
+  "deny_cidr": [],
+  "allow_ports": [],
+
+  "max_connections": 2048,
+  "max_per_ip": 64,
+  "idle_timeout": 600,
+  "connect_timeout": 12,
+
+  "log_level": "info"
+}

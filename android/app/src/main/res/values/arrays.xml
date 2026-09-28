@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="obfs_modes">
+        <item>AHURA/1 (پنهان‌سازی فعال)</item>
+        <item>SOCKS5 خام (بدون پنهان‌سازی)</item>
+    </string-array>
+    <string-array name="app_modes">
+        <item>همه برنامه‌ها</item>
+        <item>فقط برنامه‌های انتخابی</item>
+        <item>همه به‌جز برنامه‌های انتخابی</item>
+    </string-array>
+</resources>
